@@ -1,4 +1,4 @@
-# mydearmap
+# iei-itv
 
 Proyecto para la asignatura IEI (etsinf) de la Universitat Politècnica de València.
 Trata de obtener datos sobre ITVs de Cataluña, Galicia y Comunidad Valenciana de distintas fuentes y unificarlos.
@@ -8,7 +8,7 @@ Comando importante antes de ejecutar cualquier clase .py: .\.venv\Scripts\Activa
 
 ## Estructura
 
-iei_itv/
+iei-itv/
 ├── config/                  # Archivos de configuración (conexión DB, logging, etc.)
 │   └── settings.py
 ├── core/                    # Componentes base y comunes
