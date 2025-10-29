@@ -20,6 +20,7 @@ pip install -r requirements.txt
 
 ## Estructura
 
+```text
 iei-itv/
 ├── src/                          # Directorio principal del código fuente
 │   ├── api/                      # Endpoints de la API (FastAPI/Flask)
