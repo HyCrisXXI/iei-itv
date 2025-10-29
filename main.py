@@ -1,5 +1,5 @@
 # main.py
-from core.database import create_db_and_tables
+from src.core.database import create_db_and_tables
 
 def startup():
     """Función que se ejecuta al iniciar la aplicación."""

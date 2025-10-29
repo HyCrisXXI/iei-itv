@@ -2,28 +2,48 @@
 
 Proyecto para la asignatura IEI (etsinf) de la Universitat Politècnica de València.
 Trata de obtener datos sobre ITVs de Cataluña, Galicia y Comunidad Valenciana de distintas fuentes y unificarlos.
-Escribir pip install -r requirements.txt para tener todas las librerías (lista de la compra)
-Comando importante antes de ejecutar cualquier clase .py: .\.venv\Scripts\Activate.ps1
 
+Prerequisitos: Python 3.10 o superior
+
+# 1 Clonar repositorio
+git clone https://github.com/HyCrisXXI/iei-itv.git
+cd iei-itv
+
+#  2 Activar el entorno virtual
+#   En Windows (PowerShell):
+.\.venv\Scripts\Activate.ps1
+#   En macOS / Linux:
+source .venv/bin/activate
+
+#  3 Instalar dependencias del proyecto (lista de la compra)
+pip install -r requirements.txt
 
 ## Estructura
 
 iei-itv/
-├── config/                  # Archivos de configuración (conexión DB, logging, etc.)
-│   └── settings.py
-├── core/                    # Componentes base y comunes
-│   ├── database.py          # Lógica de conexión a la DB y gestión de sesiones
-│   └── models.py            # Definición de la estructura de la DB (ORM)
-├── extractors/              # Módulos para procesar datos de fuentes externas
-│   ├── extractor_gal.py     # Lógica para CSV o XML (Fuente GAL)
-│   ├── extractor_cat.py     # Lógica para XML (Fuente CAT)
-│   └── extractor_cv.py      # Lógica para JSON (Fuente CV)
-├── services/                # Lógica de negocio específica (APIs de carga/búsqueda)
-│   ├── load_service.py      # Lógica de la API de carga (maneja la inserción de datos)
-│   └── search_service.py    # Lógica de la API de búsqueda (maneja la consulta de datos)
-├── api/                     # Implementación de los endpoints de la API (usando FastAPI o Flask)
-│   └── api_routes.py        # Define los endpoints /carga y /busqueda
-├── tests/                   # Pruebas unitarias e de integración
-├── main.py                  # Punto de entrada de la aplicación
-├── requirements.txt         # Dependencias del proyecto (psycopg2, ORM, framework web)
-└── .env                     # Api keys del proyecto (supabase)
+├── src/                          # Directorio principal del código fuente
+│   ├── api/                      # Endpoints de la API (FastAPI/Flask)
+│   │   ├── __init__.py
+│   │   └── api_routes.py
+│   ├── config/                   # Módulos de configuración
+│   │   ├── __init__.py
+│   │   └── settings.py
+│   ├── core/                     # Lógica central de base de datos
+│   │   ├── __init__.py
+│   │   ├── database.py
+│   │   └── models.py
+│   ├── extractors/               # Scripts de extracción de datos
+│   │   ├── __init__.py
+│   │   ├── extractor_cat.py
+│   │   ├── extractor_cv.py
+│   │   └── extractor_gal.py
+│   └── services/                 # Lógica de negocio
+│       ├── __init__.py
+│       ├── load_service.py
+│       └── search_service.py
+├── tests/                        # Pruebas
+├── .env                          # (Ignorado por Git) Credenciales de la DB
+├── .env.example                  # Plantilla para las variables de entorno
+├── .gitignore                    # Archivos y carpetas a ignorar por Git
+├── main.py                       # Punto de entrada de la aplicación
+└── requirements.txt              # Dependencias de Python
