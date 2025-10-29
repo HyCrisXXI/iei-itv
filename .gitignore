@@ -49,5 +49,11 @@ coverage.xml
 # Sphinx documentation
 docs/_build/
 
+# Variables de entorno
 .env
+
+# Dependencias del proyecto
 .venv/
+
+# Archivos de configuración de VS Code
+.vscode/
