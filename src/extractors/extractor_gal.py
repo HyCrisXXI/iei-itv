@@ -1,3 +1,4 @@
+# src/extractors/extractor_gal.py
 import csv
 import json
 

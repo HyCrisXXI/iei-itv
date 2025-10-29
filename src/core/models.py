@@ -1,4 +1,4 @@
-# core/models.py
+# src/core/models.py
 from sqlalchemy import Column, Integer, String, Float, Enum, ForeignKey
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy_utils import ChoiceType

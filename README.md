@@ -1,25 +1,43 @@
 # iei-itv
 
-Proyecto para la asignatura IEI (etsinf) de la Universitat Politècnica de València.
-Trata de obtener datos sobre ITVs de Cataluña, Galicia y Comunidad Valenciana de distintas fuentes y unificarlos.
+Proyecto iei-itv para la asignatura IEI (etsinf) de la Universitat Politècnica de València.
+Este proyecto es una aplicación backend (API) para extraer, procesar y consultar datos de ITV de diferentes comunidades autónomas (Cataluña, Comunidad Valenciana, Galicia).
 
-Prerequisitos: Python 3.10 o superior
+## Prerrequisitos
 
-# 1 Clonar repositorio
+Necesitarás tener instalado:
+
+* **Python 3.10** o superior.
+* **Git** para clonar el repositorio.
+
+## Instalación y uso
+
+### 1. Clonar repositorio
+
+```bash
 git clone https://github.com/HyCrisXXI/iei-itv.git
 cd iei-itv
+```
 
-#  2 Activar el entorno virtual
-#   En Windows (PowerShell):
-.\.venv\Scripts\Activate.ps1
-#   En macOS / Linux:
-source .venv/bin/activate
+### 2. Activar el entorno virtual
 
-#  3 Instalar dependencias del proyecto (lista de la compra)
+* **En Windows (PowerShell):**
+    ```powershell
+    .\.venv\Scripts\Activate.ps1
+    ```
+* **En macOS / Linux:**
+    ```bash
+    source .venv/bin/activate
+    ```
+
+### 3. Instalar dependencias del proyecto (lista de la compra)
+
+```bash
 pip install -r requirements.txt
-
+```
 ## Estructura
 
+La estructura principal del proyecto sigue un diseño modular:
 ```text
 iei-itv/
 ├── src/                          # Directorio principal del código fuente
