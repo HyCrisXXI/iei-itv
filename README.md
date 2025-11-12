@@ -56,6 +56,7 @@ iei-itv/
 │   │   ├── extractor_cat.py
 │   │   ├── extractor_cv.py
 │   │   └── extractor_gal.py
+│   └── wrappers/                 # Wrappers para normalizar a .json
 │   └── services/                 # Lógica de negocio
 │       ├── __init__.py
 │       ├── load_service.py
