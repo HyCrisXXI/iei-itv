@@ -57,10 +57,7 @@ iei-itv/
 │   │   ├── extractor_cv.py
 │   │   └── extractor_gal.py
 │   └── wrappers/                 # Wrappers para normalizar a .json
-│   └── services/                 # Lógica de negocio
-│       ├── __init__.py
-│       ├── load_service.py
-│       └── search_service.py
+│   └── jsons/                    # jsons
 ├── tests/                        # Pruebas
 ├── .env                          # (Ignorado por Git) Credenciales de la DB
 ├── .env.example                  # Plantilla para las variables de entorno

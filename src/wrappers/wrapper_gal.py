@@ -9,7 +9,7 @@ def csvtojson():
     if not csv_path.exists():
         raise FileNotFoundError(f"Estacions_ITV.csv not found at: {csv_path}")
 
-    out_path = base_dir / "GAL.json"
+    out_path = base_dir / "../jsons/GAL.json"
 
     with csv_path.open("r", encoding="ISO-8859-1") as csvfile, out_path.open("w", encoding="utf8") as jsonfile:
         reader = csv.DictReader(csvfile, delimiter=';')

@@ -44,7 +44,7 @@ def xmltojson():
             data.append(record)
 
     # Write to JSON next to this script
-    out_path = base_dir / "CAT.json"
+    out_path = base_dir / "../jsons/CAT.json"
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
