@@ -1,8 +1,8 @@
-# src/core/database.py
+# src/database/session.py
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from src.config.settings import DATABASE_URL
-from src.core.models import Base
+from .settings import DATABASE_URL
+from .models import Base
 
 engine = create_engine(DATABASE_URL)
 

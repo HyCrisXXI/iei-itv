@@ -1,5 +1,6 @@
-# src/config/settings.py
+# src/database/settings.py
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()

@@ -5,11 +5,12 @@ from pathlib import Path
 
 
 def xmltojson():
-    base_dir = Path(__file__).resolve().parent
-    xml_path = base_dir / "ITV-CAT.xml"
+    xml_path = (
+        Path(__file__).resolve()
+        .parent.parent.parent / "data" / "ITV-CAT.xml"
+    )
 
     if not xml_path.exists():
-        # Helpful error with absolute path for easier debugging
         raise FileNotFoundError(f"ITV-CAT.xml not found at: {xml_path}")
 
     tree = ET.parse(xml_path)
@@ -43,8 +44,8 @@ def xmltojson():
         if record:
             data.append(record)
 
-    # Write to JSON next to this script
-    out_path = base_dir / "../jsons/CAT.json"
+    # Transformar a json para ver si se generan bien, luego no harán falta
+    out_path = Path(__file__).resolve().parent / "cat.json"
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
