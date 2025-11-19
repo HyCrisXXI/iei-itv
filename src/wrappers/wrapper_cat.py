@@ -1,10 +1,8 @@
 # src/wrappers/wrapper_cat.py
 import xml.etree.ElementTree as ET
-import json
 from pathlib import Path
 
-
-def xmltojson():
+def xmltojson() -> list:
     xml_path = (
         Path(__file__).resolve()
         .parent.parent.parent / "data" / "ITV-CAT.xml"
@@ -17,9 +15,9 @@ def xmltojson():
     root = tree.getroot()
 
     if (
-            len(root) == 1
-            and root[0].tag == "row"
-            and all(child.tag == "row" for child in root[0])
+        len(root) == 1
+        and root[0].tag == "row"
+        and all(child.tag == "row" for child in root[0])
     ):
         rows = root[0].findall("row")
     else:
@@ -44,10 +42,4 @@ def xmltojson():
         if record:
             data.append(record)
 
-    # Transformar a json para ver si se generan bien, luego no harán falta
-    out_path = Path(__file__).resolve().parent / "cat.json"
-    with out_path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
-    print("xml a json creado")
-xmltojson()
+    return data
