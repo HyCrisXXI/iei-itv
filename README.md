@@ -19,7 +19,21 @@ git clone https://github.com/HyCrisXXI/iei-itv.git
 cd iei-itv
 ```
 
-### 2. Activar el entorno virtual
+
+### 2. Crear y activar el entorno virtual
+
+Si no existe la carpeta `.venv`, créala con:
+
+* **En Windows:**
+    ```powershell
+    python -m venv .venv
+    ```
+* **En macOS / Linux:**
+    ```bash
+    python3 -m venv .venv
+    ```
+
+Luego, activa el entorno virtual:
 
 * **En Windows (PowerShell):**
     ```powershell
