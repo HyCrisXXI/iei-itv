@@ -4,9 +4,27 @@ import re
 import json
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from wrappers.wrapper_gal import csvtojson
+# from wrappers.wrapper_gal import csvtojson
+from database.models import TipoEstacion, Provincia, Localidad, Estacion
+from database.session import get_db
+
+import csv # Temporal
 
 DD_REGEX = re.compile(r"^[+-]?\d+(\.\d+)?$")
+
+# Función temporal para la primera entrega
+def csvtojson() -> list:
+    csv_path = (
+        Path(__file__).resolve()
+        .parent.parent.parent / "data" / "Estacions_ITV.csv"
+    )
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Estacions_ITV.csv not found at: {csv_path}")
+
+    with csv_path.open("r", encoding="ISO-8859-1") as csvfile:
+        reader = csv.DictReader(csvfile, delimiter=';')
+        data = [row for row in reader]
+    return data
 
 def ddm_to_dd_or_pass(s: str) -> float | None:
     s = s.strip()
@@ -29,7 +47,6 @@ def ddm_to_dd_or_pass(s: str) -> float | None:
             return None
     return None
 
-    
 def process_coordinate_pair(pair_string: str) -> tuple[float | None, float | None]:
     parts = [p.strip() for p in pair_string.split(',', 1)]
     
@@ -41,12 +58,12 @@ def process_coordinate_pair(pair_string: str) -> tuple[float | None, float | Non
     
     return lat, lon
 
-def transform_itv_record(record: dict) -> dict:
+def transform_json(record: dict) -> dict:
     KEY_MAPPING = {
         "NOME DA ESTACIÓN": "e_nombre",
         "ENDEREZO": "direccion",
         "CONCELLO": "l_nombre",
-        "CÓDIGO POSTAL": "cod_postal",
+        "CÓDIGO POSTAL": "codigo_postal",
         "PROVINCIA": "p_nombre",
         "HORARIO": "horario",
         "SOLICITUDE DE CITA PREVIA": "url",
@@ -69,20 +86,86 @@ def transform_itv_record(record: dict) -> dict:
             lat = ddm_to_dd_or_pass(parts[0]) # Función de conversión DDM/DD
             lon = ddm_to_dd_or_pass(parts[1])
             
-            transformed["lat"] = lat # Clave nueva con datos transformados
-            transformed["lon"] = lon
+            transformed["latitud"] = lat # Clave nueva con datos transformados
+            transformed["longitud"] = lon
         else:
-            transformed["lat"] = None
-            transformed["lon"] = None
+            transformed["latitud"] = None
+            transformed["longitud"] = None
     
     cod_postal_string = transformed.pop("cod_postal", None)
     transformed["p_cod"] = cod_postal_string[:2] if cod_postal_string else None
-    
     return transformed
 
-if __name__ == "__main__":
+def transformed_data_to_database():
     data_list = csvtojson()
-    transformed_data = [transform_itv_record(record) for record in data_list]
+    with next(get_db()) as session:
+        prov_cache = {}
+        loc_cache = {}
+        est_cache = {}
+        for record in data_list:
+            data = transform_json(record)
+
+            # Provincia
+            prov_name = data["p_nombre"]
+            prov = prov_cache.get(prov_name)
+            # Esto comprueba si no está la provincia en la caché
+            if not prov:
+                prov = session.query(Provincia).filter_by(nombre=prov_name).first()
+                # Comprueba que la provincia esté en la BD, si está no hace nada,
+                # si no está la sube a la BD
+                if not prov:
+                    prov = Provincia(nombre=prov_name)
+                    session.add(prov)
+                    session.flush()
+                # Esto añade a la caché la provincia si ya está en la BD, para no volverla a subir
+                prov_cache[prov_name] = prov
+
+            # Localidad
+            loc_key = (data["l_nombre"], prov.codigo)
+            loc = loc_cache.get(loc_key)
+            if loc is None:
+                loc = session.query(Localidad).filter_by(nombre=data["l_nombre"], codigo_provincia=prov.codigo).first()
+                if loc is None:
+                    loc = Localidad(nombre=data["l_nombre"], codigo_provincia=prov.codigo)
+                    session.add(loc)
+                    session.flush()
+                loc_cache[loc_key] = loc
+
+            # Estacion
+            est_key = (data["e_nombre"], loc.codigo)
+            if est_key in est_cache:
+                continue
+            est = session.query(Estacion).filter_by(nombre=data["e_nombre"], codigo_localidad=loc.codigo).first()
+            if est:
+                est_cache[est_key] = est
+                continue
+
+            estacion = Estacion(
+                nombre=data["e_nombre"],
+                tipo=TipoEstacion.Estacion_fija,
+                direccion=data.get("direccion"),
+                codigo_postal=data.get("codigo_postal"),
+                latitud=data.get("latitud"),
+                longitud=data.get("longitud"),
+                descripcion=data.get("descripcion"),
+                horario=data.get("horario"),
+                contacto=data.get("contacto"),
+                url=data.get("url"),
+                codigo_localidad=loc.codigo,
+                origen_datos="gal"
+            )
+            session.add(estacion)
+            est_cache[est_key] = estacion
+            
+        session.commit()
+
+if __name__ == "__main__":
+    # Normaliza datos a json (solo debug)
+    data_list = csvtojson()
+    transformed_data = [transform_json(record) for record in data_list]
     out_path = Path(__file__).resolve().parent / "gal.json"
     with out_path.open("w", encoding="utf-8") as jsonfile:
         json.dump(transformed_data, jsonfile, indent=4, ensure_ascii=False)
+    
+    # Sube datos a la BD (Independiente de lo anterior)
+    transformed_data_to_database()
