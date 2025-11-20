@@ -29,7 +29,7 @@ def transform_cv_record(record: dict) -> dict:
     KEY_MAPPING = {
         "TIPO ESTACIÓN": "tipo_estacion",
         "DIRECCIÓN":     "direccion",
-        "C.POSTAL":      "cod_postal",
+        "C.POSTAL":      "codigo_postal",
         "HORARIOS":      "horario",
         "CORREO":        "contacto",
         "MUNICIPIO":     "l_nombre",
@@ -42,7 +42,7 @@ def transform_cv_record(record: dict) -> dict:
             transformed[new_key] = record[old_key]
 
   
-    cod_postal_string = str(transformed.get("cod_postal", ""))
+    cod_postal_string = str(transformed.get("codigo_postal", ""))
     transformed["p_cod"] = cod_postal_string[:2] if cod_postal_string else None
 
     correo = transformed.get("contacto")
