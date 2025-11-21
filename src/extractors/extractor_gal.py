@@ -92,7 +92,7 @@ def transform_json(record: dict) -> dict:
             transformed["latitud"] = None
             transformed["longitud"] = None
     
-    cod_postal= transformed.pop("codigo_postal", None)
+    cod_postal= transformed.get("codigo_postal", None)
     transformed["p_cod"] = str(cod_postal)[:2] if cod_postal else None
     return transformed
 
