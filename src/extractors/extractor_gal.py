@@ -92,8 +92,8 @@ def transform_json(record: dict) -> dict:
             transformed["latitud"] = None
             transformed["longitud"] = None
     
-    cod_postal_string = transformed.pop("cod_postal", None)
-    transformed["p_cod"] = cod_postal_string[:2] if cod_postal_string else None
+    cod_postal= transformed.pop("codigo_postal", None)
+    transformed["p_cod"] = str(cod_postal)[:2] if cod_postal else None
     return transformed
 
 def transformed_data_to_database():
@@ -107,6 +107,7 @@ def transformed_data_to_database():
 
             # Provincia
             prov_name = data["p_nombre"]
+            prov_cod = data.get("p_cod")
             prov = prov_cache.get(prov_name)
             # Esto comprueba si no está la provincia en la caché
             if not prov:
@@ -114,7 +115,11 @@ def transformed_data_to_database():
                 # Comprueba que la provincia esté en la BD, si está no hace nada,
                 # si no está la sube a la BD
                 if not prov:
-                    prov = Provincia(nombre=prov_name)
+                    prov_args = {"nombre": prov_name}
+                    # Solo pasa codigo de provincia si existe y es válido
+                    if prov_cod:
+                        prov_args["codigo"] = prov_cod
+                    prov = Provincia(**prov_args)
                     session.add(prov)
                     session.flush()
                 # Esto añade a la caché la provincia si ya está en la BD, para no volverla a subir
