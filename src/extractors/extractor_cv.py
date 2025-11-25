@@ -30,37 +30,6 @@ def extract_domain_from_email(email: str) -> str | None:
     return email.split("@", 1)[1]
 
 
-def limpiar_direccion(texto: str) -> str:
-    if not texto:
-        return ""
-
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
-    texto = texto.replace("'", "").replace('"', "")
-    texto = re.sub(r"s[/\s]*n[º°]?", "sin numero", texto, flags=re.IGNORECASE)
-    texto = texto.replace("I.T.V", "ITV")
-    texto = texto.replace("·", " ")
-    texto = texto.replace("ª", "a")
-    texto = texto.replace("º", "o")
-    texto = re.sub(r"\s+", " ", texto)
-
-    return texto.strip()
-
-
-def normalizar_direccion(record: dict) -> str | None:
-    direccion = record.get("direccion", "")
-    municipio = record.get("l_nombre", "")
-    provincia = record.get("p_nombre", "")
-
-    if not direccion:
-        return None
-
-    direccion = limpiar_direccion(direccion)
-    municipio = limpiar_direccion(municipio)
-    provincia = limpiar_direccion(provincia)
-
-    return f"{direccion}, {municipio}, {provincia}, Espana"
-
-
 geolocator = Nominatim(user_agent="extractor_cv")
 
 
@@ -81,6 +50,15 @@ def get_coords(direccion: str):
         print(f"Error geocodificando '{direccion}': {e}")
 
     return None, None
+
+def normalize_station_type(tipo: str | None) -> str:
+    if not tipo:
+        return "Otros"
+
+    cleaned = tipo.replace("Estación", "").strip()
+
+    return cleaned if cleaned else "Otros"
+
 
 
 def transform_cv_record(record: dict) -> dict:
@@ -110,6 +88,8 @@ def transform_cv_record(record: dict) -> dict:
     lat, lon = get_coords(direccion)
     transformed["lat"] = lat
     transformed["lon"] = lon
+
+    transformed["tipo_estacion"] = normalize_station_type(transformed.get("tipo_estacion"))
 
     return transformed
 
