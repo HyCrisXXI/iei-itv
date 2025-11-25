@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-def jsontojson():
+def jsontojson() -> list:
     json_path = (
         Path(__file__).resolve()
         .parent.parent.parent / "data" / "estaciones.json"

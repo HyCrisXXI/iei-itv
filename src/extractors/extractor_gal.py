@@ -57,6 +57,8 @@ def process_coordinate_pair(pair_string: str) -> tuple[float | None, float | Non
     lon = ddm_to_dd_or_pass(parts[1])
     
     return lat, lon
+def error_msg(e_nombre: str, missing_fields):
+    print(f"Estación '{e_nombre}' no tiene datos en: {', '.join(missing_fields)}")
 
 def transform_json(record: dict) -> dict:
     KEY_MAPPING = {
@@ -76,9 +78,11 @@ def transform_json(record: dict) -> dict:
         if old_key in record:
             transformed[new_key] = record[old_key]
     
+    # Variable que sirve en esta función para mensajes de error
+    e_nombre = transformed.get("e_nombre", None)
+    
     # Elimina clave original
     coord_string = transformed.pop("coordenadas", None)
-    
     if coord_string:
         parts = [p.strip() for p in coord_string.split(',', 1)]
         
@@ -89,24 +93,42 @@ def transform_json(record: dict) -> dict:
             transformed["latitud"] = lat # Clave nueva con datos transformados
             transformed["longitud"] = lon
         else:
+            error_msg(e_nombre, ["coordenadas"])
             transformed["latitud"] = None
             transformed["longitud"] = None
-    
-    cod_postal= transformed.get("codigo_postal", None)
-    transformed["p_cod"] = str(cod_postal)[:2] if cod_postal else None
+
+    cod_postal = str(transformed.get("codigo_postal", None))
+    if cod_postal:
+        transformed["p_cod"] = cod_postal[:2]
+    else:
+        error_msg(e_nombre, ["codigo_postal"])
+        transformed["p_cod"] = None
     return transformed
 
 def transformed_data_to_database():
     data_list = csvtojson()
+    def filter_valid_fields(data: dict, required_fields: list) -> dict:
+        valid = {}
+        missing = []
+        for field in required_fields:
+            value = data.get(field)
+            if value is not None and value != "":
+                valid[field] = value
+            else:
+                missing.append(field)
+        return valid, missing
+
     with next(get_db()) as session:
         prov_cache = {}
         loc_cache = {}
         est_cache = {}
         for record in data_list:
             data = transform_json(record)
+            # Se obtiene aquí para evitar repetir código y de fallback desconocida pq es necesario para mensajes de error
+            e_nombre = data.get("e_nombre", "Desconocida")
 
             # Provincia
-            prov_name = data["p_nombre"]
+            prov_name = data.get("p_nombre")
             prov_cod = data.get("p_cod")
             prov = prov_cache.get(prov_name)
             # Esto comprueba si no está la provincia en la caché
@@ -119,6 +141,8 @@ def transformed_data_to_database():
                     # Solo pasa codigo de provincia si existe y es válido
                     if prov_cod:
                         prov_args["codigo"] = prov_cod
+                    else:
+                        print(f"No se encontró código de provincia para la estación {e_nombre}\nPor tanto se generará automáticamente en la BD\n")
                     prov = Provincia(**prov_args)
                     session.add(prov)
                     session.flush()
@@ -126,38 +150,39 @@ def transformed_data_to_database():
                 prov_cache[prov_name] = prov
 
             # Localidad
-            loc_key = (data["l_nombre"], prov.codigo)
+            loc_key = (data.get("l_nombre"), prov.codigo)
             loc = loc_cache.get(loc_key)
             if loc is None:
-                loc = session.query(Localidad).filter_by(nombre=data["l_nombre"], codigo_provincia=prov.codigo).first()
+                loc = session.query(Localidad).filter_by(nombre=data.get("l_nombre"), codigo_provincia=prov.codigo).first()
                 if loc is None:
-                    loc = Localidad(nombre=data["l_nombre"], codigo_provincia=prov.codigo)
+                    loc = Localidad(nombre=data.get("l_nombre"), codigo_provincia=prov.codigo)
                     session.add(loc)
                     session.flush()
                 loc_cache[loc_key] = loc
 
             # Estacion
-            est_key = (data["e_nombre"], loc.codigo)
+            est_key = (e_nombre, loc.codigo)
             if est_key in est_cache:
                 continue
-            est = session.query(Estacion).filter_by(nombre=data["e_nombre"], codigo_localidad=loc.codigo).first()
+            est = session.query(Estacion).filter_by(nombre=e_nombre, codigo_localidad=loc.codigo).first()
             if est:
                 est_cache[est_key] = est
                 continue
 
+            # Solo sube los campos que tengan datos
+            required_fields = [
+                "direccion", "codigo_postal", "latitud", "longitud", "horario", "contacto", "url"
+            ]
+            valid_fields, missing_fields = filter_valid_fields(data, required_fields)
+            if missing_fields:
+                error_msg(e_nombre, missing_fields)
+
             estacion = Estacion(
-                nombre=data["e_nombre"],
+                nombre=e_nombre,
                 tipo=TipoEstacion.Estacion_fija,
-                direccion=data.get("direccion"),
-                codigo_postal=data.get("codigo_postal"),
-                latitud=data.get("latitud"),
-                longitud=data.get("longitud"),
-                descripcion=data.get("descripcion"),
-                horario=data.get("horario"),
-                contacto=data.get("contacto"),
-                url=data.get("url"),
                 codigo_localidad=loc.codigo,
-                origen_datos="gal"
+                origen_datos="gal",
+                **valid_fields
             )
             session.add(estacion)
             est_cache[est_key] = estacion
