@@ -91,13 +91,22 @@ def _normalize_coordinate(value, *, is_latitude: bool) -> float | None:
     if -limit <= number <= limit:
         return round(number, 6)
 
-    scaled = number / 1_000_000
-    if -limit <= scaled <= limit:
-        return round(scaled, 6)
-
-    scaled = number / 100_000
-    if -limit <= scaled <= limit:
-        return round(scaled, 6)
+    fallback = None
+    for factor in (1_000_000, 100_000, 10_000, 1_000, 100, 10):
+        scaled = number / factor
+        if -limit <= scaled <= limit:
+            valid_lat = abs(scaled) >= 30.0 if is_latitude else True
+            valid_lon = (0.3 <= abs(scaled) <= 10.0) if not is_latitude else True
+            if valid_lat and valid_lon:
+                return round(scaled, 6)
+            if fallback is None:
+                fallback = scaled
+    if fallback is None and abs(number) > limit:
+        scaled = number / 1
+        if -limit <= scaled <= limit:
+            return round(scaled, 6)
+    if fallback is not None:
+        return round(fallback, 6)
     return None
 
 

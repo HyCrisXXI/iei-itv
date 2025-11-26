@@ -171,7 +171,16 @@ def transformed_data_to_database():
             if est:
                 est_cache[est_key] = est
                 continue
+            
+            codigo_postal = data.get("codigo_postal")
+            if len(codigo_postal) != 5:
+                error_msg(e_nombre, ["codigo_postal"])
+                continue
 
+            contacto = data.get("contacto", "")
+            if not contacto:
+                error_msg(e_nombre, ["contacto"])
+                
             # Solo sube los campos que tengan datos
             required_fields = [
                 "direccion", "codigo_postal", "latitud", "longitud", "horario", "contacto", "url"
