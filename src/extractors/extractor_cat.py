@@ -9,18 +9,6 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from database.models import TipoEstacion, Provincia, Localidad, Estacion
 from database.session import get_db
 
-provinciaCat = ["Tarragona", "Lleida", "Girona", "Barcelona"]
-
-cpCat = ["43", "25", "17", "08"]
-
-mappingProvincia = {
-    "08": "Barcelona",
-    "17": "Girona",
-    "25": "Lleida",
-    "43": "Tarragona",
-}
-
-
 def xmltojson() -> list:
     xml_path = (
         Path(__file__).resolve()
@@ -67,6 +55,15 @@ POINT_RE = re.compile(r"POINT\s*\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)
 def error_msg(e_nombre: str, missing_fields):
     print(f"Estación '{e_nombre}' no tiene datos en: {', '.join(missing_fields)}")
 
+def provincia_normalizada(nombre, codigo_postal):
+    """Normaliza nombres de provincia y prioriza la que tiene código postal."""
+    nombre = (nombre or "").strip().lower()
+    if nombre in ["valencia", "valència"]:
+        return "Valencia" if codigo_postal else "València"
+    if nombre in ["alicante", "aligante"]:
+        return "Alicante" if codigo_postal else "Aligante"
+    return nombre.title()
+
 def _extract_value(value):
     if isinstance(value, dict):
         if value.get("text"):
@@ -94,18 +91,13 @@ def _normalize_coordinate(value, *, is_latitude: bool) -> float | None:
     if -limit <= number <= limit:
         return round(number, 6)
 
-    fallback = None
-    for factor in (1_000_000, 100_000, 10_000, 1_000, 100):
-        scaled = number / factor
-        if -limit <= scaled <= limit:
-            valid_lat = abs(scaled) >= 30.0 if is_latitude else True
-            valid_lon = (0.3 <= abs(scaled) <= 10.0) if not is_latitude else True
-            if valid_lat and valid_lon:
-                return round(scaled, 6)
-            if fallback is None:
-                fallback = scaled
-    if fallback is not None:
-        return round(fallback, 6)
+    scaled = number / 1_000_000
+    if -limit <= scaled <= limit:
+        return round(scaled, 6)
+
+    scaled = number / 100_000
+    if -limit <= scaled <= limit:
+        return round(scaled, 6)
     return None
 
 
@@ -133,6 +125,20 @@ def _coordinates_from_record(record: dict) -> tuple[float | None, float | None]:
             lon = _normalize_coordinate(lon_raw, is_latitude=False)
         if lat is None:
             lat = _normalize_coordinate(lat_raw, is_latitude=True)
+
+    locator = record.get("localitzador_a_google_maps")
+    if (lat is None or lon is None) and isinstance(locator, dict):
+        url = locator.get("url")
+        if isinstance(url, str):
+            match = re.search(r"q=([+-]?\d+(?:\.\d+)?)\+([+-]?\d+(?:\.\d+)?)", url)
+            if match:
+                lat_candidate = _normalize_coordinate(match.group(1), is_latitude=True)
+                lon_candidate = _normalize_coordinate(match.group(2), is_latitude=False)
+                if lat is None:
+                    lat = lat_candidate
+                if lon is None:
+                    lon = lon_candidate
+
     return lat, lon
 
 
@@ -142,7 +148,6 @@ def _province_code_from_postal(postal) -> str | None:
     digits = "".join(ch for ch in str(postal) if ch.isdigit())
     if len(digits) >= 2:
         return digits[:2]
-    
     return None
 
 
@@ -174,7 +179,6 @@ def transform_itv_record(record: dict) -> dict:
             transformed[new_key] = value
 
     transformed["tipo"] = "fija"
-
     if not transformed.get("contacto"):
         transformed["contacto"] = transformed.get("url")
 
@@ -187,6 +191,7 @@ def transform_itv_record(record: dict) -> dict:
         codigo_postal = str(codigo_postal).strip()
         transformed["codigo_postal"] = codigo_postal or None
     transformed["p_cod"] = _province_code_from_postal(codigo_postal)
+    
     return transformed
 
 
@@ -202,44 +207,76 @@ def transformed_data_to_database(records: list | None = None):
             else:
                 missing.append(field)
         return valid, missing
+
+    # Cache para provincias normalizadas
+    prov_cache = {}
+    prov_seen = {}
+
     with next(get_db()) as session:
-        prov_cache = {}
         loc_cache = {}
         est_cache = {}
 
         for record in data_list:
             data = transform_itv_record(record)
+            est_name = data.get("nombre", "Desconocida")
+            prov_name_raw = data.get("nombre_provincia")
+            codigo_postal = data.get("codigo_postal")
+            prov_name = provincia_normalizada(prov_name_raw, codigo_postal)
+            data["nombre_provincia"] = prov_name
 
-            p_code = data.get("p_cod")
-
-            prov_name = data.get("nombre_provincia")
-            if prov_name not in provinciaCat:
-                if p_code in cpCat:
-                    prov_name = mappingProvincia[p_code]
-                    print(f"Ajustando provincia de estación '{data.get('nombre', 'Desconocida')}' de '{data.get('nombre_provincia', 'Desconocida')}' a '{prov_name}' según código postal.")
-                else:
-                    error_msg(data.get("nombre", "Desconocida"), ["nombre_provincia"])
-                    continue
-            if not prov_name:
-                continue
-            prov = prov_cache.get(prov_name)
+            # Prioriza provincia con código postal, muestra error si hay duplicidad
+            prov_key = prov_name.lower()
             prov_code_int = _safe_int(data.get("p_cod"))
+            if prov_key in prov_seen:
+                # Si ya existe, solo actualiza si el nuevo tiene código postal y el anterior no
+                prev = prov_seen[prov_key]
+                if not prev["codigo_postal"] and codigo_postal:
+                    prov_seen[prov_key] = {"nombre": prov_name, "codigo_postal": codigo_postal, "codigo": prov_code_int}
+                else:
+                    error_msg(est_name, [f"Duplicidad provincia '{prov_name_raw}' tratada como '{prov_name}'"])
+            else:
+                prov_seen[prov_key] = {"nombre": prov_name, "codigo_postal": codigo_postal, "codigo": prov_code_int}
+
+        # Inserta provincias únicas
+        for prov_key, prov_info in prov_seen.items():
+            prov = None
+            # Buscar primero por código si existe
+            if prov_info["codigo"]:
+                prov = session.query(Provincia).filter_by(codigo=prov_info["codigo"]).first()
+                if prov:
+                    # Si el nombre es distinto, muestra advertencia
+                    if prov.nombre != prov_info["nombre"]:
+                        print(f"Advertencia: provincia con código {prov_info['codigo']} ya existe como '{prov.nombre}', no se inserta '{prov_info['nombre']}'")
+                # Si existe, no insertar, solo añadir a la caché
             if not prov:
-                query = session.query(Provincia)
-                if prov_code_int is not None:
-                    prov = query.filter_by(codigo=prov_code_int).first()
-                if not prov:
-                    prov = query.filter_by(nombre=prov_name).first()
-                if not prov:
-                    if prov_code_int is None:
-                        continue
-                    prov = Provincia(codigo=prov_code_int, nombre=prov_name)
-                    session.add(prov)
-                    session.flush()
-                prov_cache[prov_name] = prov
+                # Si no existe por código, buscar por nombre
+                prov = session.query(Provincia).filter_by(nombre=prov_info["nombre"]).first()
+            if not prov:
+                prov_args = {"nombre": prov_info["nombre"]}
+                if prov_info["codigo"]:
+                    prov_args["codigo"] = prov_info["codigo"]
+                prov = Provincia(**prov_args)
+                session.add(prov)
+                session.flush()
+            prov_cache[prov_info["nombre"]] = prov
+
+        # Inserta localidades y estaciones
+        for record in data_list:
+            data = transform_itv_record(record)
+            est_name = data.get("nombre", "Desconocida")
+            prov_name_raw = data.get("nombre_provincia")
+            codigo_postal = data.get("codigo_postal")
+            prov_name = provincia_normalizada(prov_name_raw, codigo_postal)
+            data["nombre_provincia"] = prov_name
+
+            prov = prov_cache.get(prov_name)
+            if not prov:
+                error_msg(est_name, [f"Provincia '{prov_name}' no encontrada"])
+                continue
 
             loc_name = data.get("nombre_localidad")
             if not loc_name:
+                error_msg(est_name, ["nombre_localidad"])
                 continue
             loc_key = (loc_name, prov.codigo)
             loc = loc_cache.get(loc_key)
@@ -251,9 +288,6 @@ def transformed_data_to_database(records: list | None = None):
                     session.flush()
                 loc_cache[loc_key] = loc
 
-            est_name = data.get("nombre")
-            if not est_name:
-                continue
             est_key = (est_name, loc.codigo)
             if est_key in est_cache:
                 continue
@@ -262,7 +296,7 @@ def transformed_data_to_database(records: list | None = None):
                 est_cache[est_key] = est
                 continue
 
-            # Solo sube los campos que tengan datos
+            codigo_postal_int = _safe_int(data.get("codigo_postal"))
             required_fields = [
                 "direccion", "codigo_postal", "latitud", "longitud", "horario", "contacto", "url"
             ]
