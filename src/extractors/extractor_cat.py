@@ -82,13 +82,19 @@ def _normalize_coordinate(value, *, is_latitude: bool) -> float | None:
     if -limit <= number <= limit:
         return round(number, 6)
 
-    scaled = number / 1_000_000
-    if -limit <= scaled <= limit:
-        return round(scaled, 6)
-
-    scaled = number / 100_000
-    if -limit <= scaled <= limit:
-        return round(scaled, 6)
+    fallback = None
+    for factor in (1_000_000, 100_000, 10_000, 1_000, 100):
+        scaled = number / factor
+        if -limit <= scaled <= limit:
+            valid_lat = abs(scaled) >= 30.0 if is_latitude else True
+            valid_lon = (0.3 <= abs(scaled) <= 10.0) if not is_latitude else True
+            if valid_lat and valid_lon:
+                print(round(scaled, 6))
+                return round(scaled, 6)
+            if fallback is None:
+                fallback = scaled
+    if fallback is not None:
+        return round(fallback, 6)
     return None
 
 
@@ -116,20 +122,6 @@ def _coordinates_from_record(record: dict) -> tuple[float | None, float | None]:
             lon = _normalize_coordinate(lon_raw, is_latitude=False)
         if lat is None:
             lat = _normalize_coordinate(lat_raw, is_latitude=True)
-
-    locator = record.get("localitzador_a_google_maps")
-    if (lat is None or lon is None) and isinstance(locator, dict):
-        url = locator.get("url")
-        if isinstance(url, str):
-            match = re.search(r"q=([+-]?\d+(?:\.\d+)?)\+([+-]?\d+(?:\.\d+)?)", url)
-            if match:
-                lat_candidate = _normalize_coordinate(match.group(1), is_latitude=True)
-                lon_candidate = _normalize_coordinate(match.group(2), is_latitude=False)
-                if lat is None:
-                    lat = lat_candidate
-                if lon is None:
-                    lon = lon_candidate
-
     return lat, lon
 
 
@@ -139,6 +131,7 @@ def _province_code_from_postal(postal) -> str | None:
     digits = "".join(ch for ch in str(postal) if ch.isdigit())
     if len(digits) >= 2:
         return digits[:2]
+    
     return None
 
 
@@ -170,6 +163,7 @@ def transform_itv_record(record: dict) -> dict:
             transformed[new_key] = value
 
     transformed["tipo"] = "fija"
+
     if not transformed.get("contacto"):
         transformed["contacto"] = transformed.get("url")
 
