@@ -9,6 +9,18 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from database.models import TipoEstacion, Provincia, Localidad, Estacion
 from database.session import get_db
 
+provinciaCat = ["Tarragona", "Lleida", "Girona", "Barcelona"]
+
+cpCat = ["43", "25", "17", "08"]
+
+mappingProvincia = {
+    "08": "Barcelona",
+    "17": "Girona",
+    "25": "Lleida",
+    "43": "Tarragona",
+}
+
+
 def xmltojson() -> list:
     xml_path = (
         Path(__file__).resolve()
@@ -89,7 +101,6 @@ def _normalize_coordinate(value, *, is_latitude: bool) -> float | None:
             valid_lat = abs(scaled) >= 30.0 if is_latitude else True
             valid_lon = (0.3 <= abs(scaled) <= 10.0) if not is_latitude else True
             if valid_lat and valid_lon:
-                print(round(scaled, 6))
                 return round(scaled, 6)
             if fallback is None:
                 fallback = scaled
@@ -176,7 +187,6 @@ def transform_itv_record(record: dict) -> dict:
         codigo_postal = str(codigo_postal).strip()
         transformed["codigo_postal"] = codigo_postal or None
     transformed["p_cod"] = _province_code_from_postal(codigo_postal)
-    
     return transformed
 
 
@@ -200,7 +210,16 @@ def transformed_data_to_database(records: list | None = None):
         for record in data_list:
             data = transform_itv_record(record)
 
+            p_code = data.get("p_cod")
+
             prov_name = data.get("nombre_provincia")
+            if prov_name not in provinciaCat:
+                if p_code in cpCat:
+                    prov_name = mappingProvincia[p_code]
+                    print(f"Ajustando provincia de estación '{data.get('nombre', 'Desconocida')}' de '{data.get('nombre_provincia', 'Desconocida')}' a '{prov_name}' según código postal.")
+                else:
+                    error_msg(data.get("nombre", "Desconocida"), ["nombre_provincia"])
+                    continue
             if not prov_name:
                 continue
             prov = prov_cache.get(prov_name)
@@ -243,7 +262,6 @@ def transformed_data_to_database(records: list | None = None):
                 est_cache[est_key] = est
                 continue
 
-            codigo_postal_int = _safe_int(data.get("codigo_postal"))
             # Solo sube los campos que tengan datos
             required_fields = [
                 "direccion", "codigo_postal", "latitud", "longitud", "horario", "contacto", "url"
