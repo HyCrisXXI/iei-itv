@@ -141,8 +141,7 @@ def transformed_data_to_database():
                     # Solo pasa codigo de provincia si existe y es válido
                     if prov_cod:
                         prov_args["codigo"] = prov_cod
-                    else:
-                        print(f"No se encontró código de provincia para la estación {e_nombre}\nPor tanto se generará automáticamente en la BD\n")
+                    
                     prov = Provincia(**prov_args)
                     session.add(prov)
                     session.flush()
