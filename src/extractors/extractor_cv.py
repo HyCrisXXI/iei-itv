@@ -12,6 +12,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
+from database.models import TipoEstacion, Provincia, Localidad, Estacion
+from database.session import get_db, create_db_and_tables
 
 
 def jsontojson():
@@ -220,6 +222,7 @@ def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
         if old_key in record:
             transformed[new_key] = record[old_key]
 
+  
     cod_postal_string = str(transformed.get("codigo_postal", ""))
     transformed["p_cod"] = cod_postal_string[:2] if cod_postal_string else None
 
@@ -248,14 +251,121 @@ def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
 
     return transformed
 
+
+def _map_tipo_enum(tipo_str: str) -> TipoEstacion:
+    if not tipo_str:
+        return TipoEstacion.Otros
+    t = tipo_str.strip().lower()
+    if 'fija' in t:
+        return TipoEstacion.Estacion_fija
+    if 'mov' in t or 'móvil' in t:
+        return TipoEstacion.Estacion_movil
+    return TipoEstacion.Otros
+
+
+def insert_transformed_to_db(transformed_list: list) -> tuple[int, int]:
+    """Insert transformed CV records into the database without additional validation.
+    Returns (inserted_count, skipped_count).
+    """
+    create_db_and_tables()
+    inserted = 0
+    skipped = 0
+
+    with next(get_db()) as session:
+        prov_cache = {}
+        loc_cache = {}
+        est_cache = {}
+
+        for rec in transformed_list:
+            nombre = rec.get('nombre') or 'Desconocida'
+            p_nombre = rec.get('p_nombre')
+            l_nombre = rec.get('l_nombre')
+            p_cod = rec.get('p_cod')
+
+            # Provincia
+            prov = prov_cache.get(p_nombre)
+            if prov is None:
+                prov = session.query(Provincia).filter_by(nombre=p_nombre).first()
+                if not prov:
+                    prov_args = {"nombre": p_nombre}
+                    if p_cod:
+                        try:
+                            prov_args["codigo"] = int(str(p_cod))
+                        except Exception:
+                            prov_args["codigo"] = None
+                    prov = Provincia(**prov_args)
+                    session.add(prov)
+                    session.flush()
+                prov_cache[p_nombre] = prov
+
+            # Localidad
+            loc_key = (l_nombre, prov.codigo)
+            loc = loc_cache.get(loc_key)
+            if loc is None:
+                loc = session.query(Localidad).filter_by(nombre=l_nombre, codigo_provincia=prov.codigo).first()
+                if loc is None:
+                    loc = Localidad(nombre=l_nombre, codigo_provincia=prov.codigo)
+                    session.add(loc)
+                    session.flush()
+                loc_cache[loc_key] = loc
+
+            # Estacion duplicate check
+            est_key = (nombre, loc.codigo)
+            if est_key in est_cache:
+                skipped += 1
+                continue
+            existing = session.query(Estacion).filter_by(nombre=nombre, codigo_localidad=loc.codigo).first()
+            if existing:
+                est_cache[est_key] = existing
+                skipped += 1
+                continue
+
+            # Map and insert
+            codigo_postal = rec.get('codigo_postal')
+            try:
+                if codigo_postal is not None:
+                    codigo_postal = int(str(codigo_postal).strip())
+            except Exception:
+                codigo_postal = None
+
+            estacion_kwargs = {
+                'nombre': nombre,
+                'tipo': _map_tipo_enum(rec.get('tipo_estacion') or rec.get('tipo')),
+                'codigo_localidad': loc.codigo,
+                'origen_datos': 'cv',
+                'direccion': rec.get('direccion'),
+                'codigo_postal': codigo_postal,
+                'latitud': rec.get('lat'),
+                'longitud': rec.get('lon'),
+                'horario': rec.get('horario'),
+                'contacto': rec.get('contacto'),
+                'url': rec.get('url'),
+            }
+
+            estacion = Estacion(**estacion_kwargs)
+            session.add(estacion)
+            est_cache[est_key] = estacion
+            inserted += 1
+
+        session.commit()
+
+    return inserted, skipped
+
 if __name__ == "__main__":
     # Obtener nombres reales de sitval
     municipios, codigos_postales, provincias = scrape_sitval_centros()
     station_names_map = dict(zip(codigos_postales, municipios))
-    
+
     data_list = jsontojson()
     transformed_data = [transform_cv_record(record, station_names_map) for record in data_list]
     transformed_data = [t for t in transformed_data if t is not None]
     out_path = Path(__file__).resolve().parent / "cv.json"
     with out_path.open("w", encoding="utf-8") as jsonfile:
         json.dump(transformed_data, jsonfile, indent=4, ensure_ascii=False)
+
+    # Automatic DB insertion (no validation). WARNING: this will perform writes.
+    try:
+        inserted, skipped = insert_transformed_to_db(transformed_data)
+        print(f"DB insertion completed. Inserted: {inserted}, Skipped: {skipped}")
+    except Exception as e:
+        print(f"Error inserting data into DB: {e}")
