@@ -138,9 +138,18 @@ def transformed_data_to_database():
                 # si no está la sube a la BD
                 if not prov:
                     prov_args = {"nombre": prov_name}
-                    # Solo pasa codigo de provincia si existe y es válido
+                    # Busca primero por código si existe
+                    prov = None
                     if prov_cod:
-                        prov_args["codigo"] = prov_cod
+                        prov = session.query(Provincia).filter_by(codigo=prov_cod).first()
+                    # Si no existe por código, busca por nombre
+                    if not prov:
+                        prov = session.query(Provincia).filter_by(nombre=prov_name).first()
+                    # Si no existe, créala
+                    if not prov:
+                        prov_args = {"nombre": prov_name}
+                        if prov_cod:
+                            prov_args["codigo"] = prov_cod
                     
                     prov = Provincia(**prov_args)
                     session.add(prov)
