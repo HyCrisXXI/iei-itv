@@ -351,6 +351,15 @@ def insert_transformed_to_db(transformed_list: list) -> tuple[int, int]:
 
     return inserted, skipped
 
+def transformed_data_to_database():
+    """Transforma los datos de CV y los inserta en la BD."""
+    municipios, codigos_postales, provincias = scrape_sitval_centros()
+    station_names_map = dict(zip(codigos_postales, municipios))
+    data_list = jsontojson()
+    transformed_data = [transform_cv_record(record, station_names_map) for record in data_list]
+    transformed_data = [t for t in transformed_data if t is not None]
+    return insert_transformed_to_db(transformed_data)
+
 if __name__ == "__main__":
     # Obtener nombres reales de sitval
     municipios, codigos_postales, provincias = scrape_sitval_centros()
