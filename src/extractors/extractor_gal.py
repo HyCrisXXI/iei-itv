@@ -130,32 +130,27 @@ def transformed_data_to_database():
             # Provincia
             prov_name = data.get("p_nombre")
             prov_cod = data.get("p_cod")
-            prov = prov_cache.get(prov_name)
-            # Esto comprueba si no está la provincia en la caché
-            if not prov:
+            prov = None
+
+            if prov_cod:
+                prov = session.query(Provincia).filter_by(codigo=prov_cod).first()
+                if prov:
+                    # Si el nombre es distinto, actualiza el nombre
+                    if prov.nombre != prov_name:
+                        prov.nombre = prov_name
+                        session.flush()
+            else:
                 prov = session.query(Provincia).filter_by(nombre=prov_name).first()
-                # Comprueba que la provincia esté en la BD, si está no hace nada,
-                # si no está la sube a la BD
-                if not prov:
-                    prov_args = {"nombre": prov_name}
-                    # Busca primero por código si existe
-                    prov = None
-                    if prov_cod:
-                        prov = session.query(Provincia).filter_by(codigo=prov_cod).first()
-                    # Si no existe por código, busca por nombre
-                    if not prov:
-                        prov = session.query(Provincia).filter_by(nombre=prov_name).first()
-                    # Si no existe, créala
-                    if not prov:
-                        prov_args = {"nombre": prov_name}
-                        if prov_cod:
-                            prov_args["codigo"] = prov_cod
-                    
-                    prov = Provincia(**prov_args)
-                    session.add(prov)
-                    session.flush()
-                # Esto añade a la caché la provincia si ya está en la BD, para no volverla a subir
-                prov_cache[prov_name] = prov
+
+            if not prov:
+                prov_args = {"nombre": prov_name}
+                if prov_cod:
+                    prov_args["codigo"] = prov_cod
+                prov = Provincia(**prov_args)
+                session.add(prov)
+                session.flush()
+            # Esto añade a la caché la provincia si ya está en la BD, para no volverla a subir
+            prov_cache[prov_name] = prov
 
             # Localidad
             loc_key = (data.get("l_nombre"), prov.codigo)
