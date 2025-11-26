@@ -204,8 +204,6 @@ def normalize_station_type(tipo: str | None) -> str:
 
 def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
     tipo_raw = record.get("TIPO ESTACIÓN", "")
-    if "móvil" in tipo_raw.lower() or "agrícola" in tipo_raw.lower():
-        return None
     
     KEY_MAPPING = {
         "TIPO ESTACIÓN": "tipo_estacion",
@@ -222,6 +220,10 @@ def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
         if old_key in record:
             transformed[new_key] = record[old_key]
 
+    # Normaliza tipo para mantener consistencia en BD
+    transformed["tipo_estacion"] = normalize_station_type(
+        transformed.get("tipo_estacion") or tipo_raw
+    )
   
     cod_postal_string = str(transformed.get("codigo_postal", ""))
     transformed["p_cod"] = cod_postal_string[:2] if cod_postal_string else None
@@ -236,18 +238,25 @@ def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
     transformed["lat"] = lat
     transformed["lon"] = lon
 
-    transformed["tipo_estacion"] = normalize_station_type(transformed.get("tipo_estacion"))
-    
-    # Usar el nombre real de sitval si existe en el mapeo
+    # Determina un nombre estable incluso sin municipio/código postal
     cod_postal = record.get("C.POSTAL")
+    station_code = str(record.get("Nº ESTACIÓN", "")).strip()
+    nombre_base = None
+    
     if cod_postal:
         cod_postal_str = str(cod_postal).strip()
         if cod_postal_str in station_names_map:
             nombre_sitval = station_names_map[cod_postal_str]
-            transformed["nombre"] = f"ITV {nombre_sitval} SITVAL"
-    else:
-        # Si no hay código postal en el mapeo, usar municipio como fallback
-        transformed["nombre"] = f"ITV {record.get('MUNICIPIO', '')} SITVAL"
+            nombre_base = nombre_sitval
+
+    if not nombre_base and station_code:
+        nombre_base = station_code
+    if not nombre_base and municipio:
+        nombre_base = municipio
+    if not nombre_base:
+        nombre_base = provincia or "Desconocida"
+
+    transformed["nombre"] = f"ITV {nombre_base} SITVAL".strip()
 
     return transformed
 
@@ -350,15 +359,6 @@ def insert_transformed_to_db(transformed_list: list) -> tuple[int, int]:
         session.commit()
 
     return inserted, skipped
-
-def transformed_data_to_database():
-    """Transforma los datos de CV y los inserta en la BD."""
-    municipios, codigos_postales, provincias = scrape_sitval_centros()
-    station_names_map = dict(zip(codigos_postales, municipios))
-    data_list = jsontojson()
-    transformed_data = [transform_cv_record(record, station_names_map) for record in data_list]
-    transformed_data = [t for t in transformed_data if t is not None]
-    return insert_transformed_to_db(transformed_data)
 
 if __name__ == "__main__":
     # Obtener nombres reales de sitval
