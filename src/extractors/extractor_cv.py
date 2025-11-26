@@ -7,6 +7,11 @@ from geopy.geocoders import Nominatim
 import time
 import re
 import unicodedata
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
 
 
 def jsontojson():
@@ -24,6 +29,128 @@ def jsontojson():
     return data
 
 
+def scrape_sitval_centros():
+    """
+    Scrape sitval.com/centros y extrae municipios, códigos postales y provincias.
+    Devuelve una tupla (municipios_list, codigos_postales_list, provincias_list) con listas paralelas.
+    """
+    url = "https://sitval.com/centros"
+    
+    options = webdriver.ChromeOptions()
+    options.add_argument('--start-maximized')
+    
+    driver = webdriver.Chrome(options=options)
+    
+    try:
+        driver.get(url)
+        
+        wait = WebDriverWait(driver, 10)
+        wait.until(EC.presence_of_all_elements_located((By.TAG_NAME, "table")))
+        
+        time.sleep(2)
+        
+        page_source = driver.page_source
+        soup = BeautifulSoup(page_source, 'html.parser')
+        
+    finally:
+        driver.quit()
+    
+    datos = []
+    
+    # Buscar todos los h1 que contienen "Estaciones fijas"
+    h1_elements = soup.find_all('h1')
+    
+    for h1 in h1_elements:
+        if 'Estaciones fijas' in h1.get_text():
+            # Encontrar todos los h2 después de este h1
+            current = h1.find_next_sibling()
+            
+            while current:
+                if current.name == 'h2':
+                    provincia_text = current.get_text(strip=True)
+                    
+                    if provincia_text in ['Alicante', 'Castellón', 'Castelló', 'València']:
+                        provincia_actual = provincia_text
+                        if provincia_actual == 'Castelló':
+                            provincia_actual = 'Castellón'
+                        
+                        # Encontrar la tabla después de este h2
+                        tabla = current.find_next('table')
+                        if tabla:
+                            rows = tabla.find_all('tr')
+                            for row in rows:
+                                cols = row.find_all('td')
+                                
+                                if len(cols) < 2:
+                                    continue
+                                
+                                row_data = [col.get_text(strip=True) for col in cols]
+                                
+                                municipio = row_data[0].strip()
+                                codigo_postal = row_data[1].strip()
+                                
+                                if municipio and codigo_postal and re.match(r'^\d{5}$', codigo_postal):
+                                    datos.append({
+                                        'Municipio': municipio,
+                                        'Código Postal': codigo_postal,
+                                        'Provincia': provincia_actual
+                                    })
+                
+                current = current.find_next_sibling()
+                
+                # Parar si encontramos otro h1
+                if current and current.name == 'h1':
+                    break
+    
+    # Si no encontramos datos con h2, intentar otra estrategia usando códigos postales
+    if not datos:
+        tables = soup.find_all('table')
+        for table in tables:
+            rows = table.find_all('tr')
+            for row in rows:
+                cols = row.find_all('td')
+                
+                if len(cols) < 2:
+                    continue
+                
+                row_data = [col.get_text(strip=True) for col in cols]
+                
+                municipio = row_data[0].strip()
+                codigo_postal = row_data[1].strip()
+                
+                if municipio and codigo_postal and re.match(r'^\d{5}$', codigo_postal):
+                    # Determinar provincia por código postal
+                    cp_num = int(codigo_postal[:2])
+                    if cp_num == 3:
+                        provincia = 'Alicante'
+                    elif cp_num == 12:
+                        provincia = 'Castellón'
+                    elif cp_num == 46:
+                        provincia = 'València'
+                    else:
+                        provincia = 'Desconocida'
+                    
+                    datos.append({
+                        'Municipio': municipio,
+                        'Código Postal': codigo_postal,
+                        'Provincia': provincia
+                    })
+    
+    # Eliminar duplicados manteniendo el orden
+    municipios_unicos = {}
+    for item in datos:
+        key = (item['Municipio'], item['Código Postal'], item['Provincia'])
+        if key not in municipios_unicos:
+            municipios_unicos[key] = item
+    
+    # Crear listas separadas
+    municipios_list = [m for m, cp, p in municipios_unicos.keys()]
+    codigos_postales_list = [cp for m, cp, p in municipios_unicos.keys()]
+    provincias_list = [p for m, cp, p in municipios_unicos.keys()]
+    
+    return (municipios_list, codigos_postales_list, provincias_list)
+
+
 def extract_domain_from_email(email: str) -> str | None:
     if not email or "@" not in email:
         return None
@@ -33,21 +160,33 @@ def extract_domain_from_email(email: str) -> str | None:
 geolocator = Nominatim(user_agent="extractor_cv")
 
 
-def get_coords(direccion: str):
-    if not direccion:
+def get_coords(direccion: str, municipio: str = "", provincia: str = ""):
+    """
+    Intenta geocodificar usando varias estrategias progresivas.
+    """
+    if not direccion and not municipio:
         return None, None
 
-    try:
-        loc = geolocator.geocode(direccion, timeout=10)
-        time.sleep(1)
-        if not loc:
-            loc = geolocator.geocode({"q": direccion}, timeout=10)
-            time.sleep(1)
-        if loc:
-            return loc.latitude, loc.longitude
+    # Estrategias de geocodificación en orden de especificidad
+    strategies = [
+        direccion,  # Dirección completa
+        f"{direccion}, {municipio}" if direccion and municipio else None,  # Dirección + municipio
+        f"{direccion}, {municipio}, {provincia}" if direccion and municipio and provincia else None,  # Dirección + municipio + provincia
+        f"{municipio}, {provincia}" if municipio and provincia else None,  # Solo municipio + provincia
+        municipio if municipio else None,  # Solo municipio
+    ]
 
-    except Exception as e:
-        print(f"Error geocodificando '{direccion}': {e}")
+    for strategy in strategies:
+        if not strategy:
+            continue
+        
+        try:
+            loc = geolocator.geocode(strategy, timeout=10)
+            time.sleep(0.5)
+            if loc:
+                return loc.latitude, loc.longitude
+        except Exception:
+            pass
 
     return None, None
 
@@ -61,7 +200,11 @@ def normalize_station_type(tipo: str | None) -> str:
 
 
 
-def transform_cv_record(record: dict) -> dict:
+def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
+    tipo_raw = record.get("TIPO ESTACIÓN", "")
+    if "móvil" in tipo_raw.lower() or "agrícola" in tipo_raw.lower():
+        return None
+    
     KEY_MAPPING = {
         "TIPO ESTACIÓN": "tipo_estacion",
         "DIRECCIÓN":     "direccion",
@@ -77,7 +220,6 @@ def transform_cv_record(record: dict) -> dict:
         if old_key in record:
             transformed[new_key] = record[old_key]
 
-  
     cod_postal_string = str(transformed.get("codigo_postal", ""))
     transformed["p_cod"] = cod_postal_string[:2] if cod_postal_string else None
 
@@ -85,17 +227,35 @@ def transform_cv_record(record: dict) -> dict:
     transformed["url"] = extract_domain_from_email(correo)
 
     direccion = transformed.get("direccion")
-    lat, lon = get_coords(direccion)
+    municipio = record.get("MUNICIPIO", "")
+    provincia = record.get("PROVINCIA", "")
+    lat, lon = get_coords(direccion, municipio, provincia)
     transformed["lat"] = lat
     transformed["lon"] = lon
 
     transformed["tipo_estacion"] = normalize_station_type(transformed.get("tipo_estacion"))
+    
+    # Usar el nombre real de sitval si existe en el mapeo
+    cod_postal = record.get("C.POSTAL")
+    if cod_postal:
+        cod_postal_str = str(cod_postal).strip()
+        if cod_postal_str in station_names_map:
+            nombre_sitval = station_names_map[cod_postal_str]
+            transformed["nombre"] = f"ITV {nombre_sitval} SITVAL"
+    else:
+        # Si no hay código postal en el mapeo, usar municipio como fallback
+        transformed["nombre"] = f"ITV {record.get('MUNICIPIO', '')} SITVAL"
 
     return transformed
 
 if __name__ == "__main__":
+    # Obtener nombres reales de sitval
+    municipios, codigos_postales, provincias = scrape_sitval_centros()
+    station_names_map = dict(zip(codigos_postales, municipios))
+    
     data_list = jsontojson()
-    transformed_data = [transform_cv_record(record) for record in data_list]
+    transformed_data = [transform_cv_record(record, station_names_map) for record in data_list]
+    transformed_data = [t for t in transformed_data if t is not None]
     out_path = Path(__file__).resolve().parent / "cv.json"
     with out_path.open("w", encoding="utf-8") as jsonfile:
         json.dump(transformed_data, jsonfile, indent=4, ensure_ascii=False)

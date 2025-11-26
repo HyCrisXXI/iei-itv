@@ -58,4 +58,4 @@ docs/_build/
 # Archivos de configuración de VS Code
 .vscode/
 
-*.json
+src/extractors/*.json
