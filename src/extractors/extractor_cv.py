@@ -203,6 +203,7 @@ def normalize_station_type(tipo: str | None) -> str:
 
 
 def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
+    tipo_raw = record.get("TIPO ESTACIÓN", "")
     KEY_MAPPING = {
         "TIPO ESTACIÓN": "tipo_estacion",
         "DIRECCIÓN":     "direccion",
@@ -218,9 +219,11 @@ def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
         if old_key in record:
             transformed[new_key] = record[old_key]
 
-    # Todas las estaciones se marcan como fija
-    transformed["tipo_estacion"] = "Fija"
-  
+    # Normaliza tipo para mantener consistencia en BD
+    transformed["tipo_estacion"] = normalize_station_type(
+        transformed.get("tipo_estacion") or tipo_raw
+    )
+    
     cod_postal_string = str(transformed.get("codigo_postal", ""))
     transformed["p_cod"] = cod_postal_string[:2] if cod_postal_string else None
 
