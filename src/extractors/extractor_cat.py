@@ -52,6 +52,8 @@ def xmltojson() -> list:
     return data
 POINT_RE = re.compile(r"POINT\s*\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*\)", re.IGNORECASE)
 
+def error_msg(e_nombre: str, missing_fields):
+    print(f"Estación '{e_nombre}' no tiene datos en: {', '.join(missing_fields)}")
 
 def _extract_value(value):
     if isinstance(value, dict):
@@ -186,6 +188,16 @@ def transform_itv_record(record: dict) -> dict:
 
 def transformed_data_to_database(records: list | None = None):
     data_list = records if records is not None else xmltojson()
+    def filter_valid_fields(data: dict, required_fields: list) -> dict:
+        valid = {}
+        missing = []
+        for field in required_fields:
+            value = data.get(field)
+            if value is not None and value != "":
+                valid[field] = value
+            else:
+                missing.append(field)
+        return valid, missing
     with next(get_db()) as session:
         prov_cache = {}
         loc_cache = {}
@@ -238,19 +250,20 @@ def transformed_data_to_database(records: list | None = None):
                 continue
 
             codigo_postal_int = _safe_int(data.get("codigo_postal"))
+            # Solo sube los campos que tengan datos
+            required_fields = [
+                "direccion", "codigo_postal", "latitud", "longitud", "horario", "contacto", "url"
+            ]
+            valid_fields, missing_fields = filter_valid_fields(data, required_fields)
+            if missing_fields:
+                error_msg(est_name, missing_fields)
+
             estacion = Estacion(
                 nombre=est_name,
                 tipo=TipoEstacion.Estacion_fija,
-                direccion=data.get("direccion"),
-                codigo_postal=codigo_postal_int,
-                latitud=data.get("latitud"),
-                longitud=data.get("longitud"),
-                descripcion=data.get("descripcion"),
-                horario=data.get("horario"),
-                contacto=data.get("contacto"),
-                url=data.get("url"),
                 codigo_localidad=loc.codigo,
                 origen_datos="cat",
+                **valid_fields
             )
             session.add(estacion)
             est_cache[est_key] = estacion
