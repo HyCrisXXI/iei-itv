@@ -8,6 +8,8 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from database.models import TipoEstacion, Provincia, Localidad, Estacion
 from database.session import get_db
 
+from errors.errors import error_msg, check_postal_code, check_coords
+
 import csv # Temporal
 
 DD_REGEX = re.compile(r"^[+-]?\d+(\.\d+)?$")
@@ -57,8 +59,6 @@ def process_coordinate_pair(pair_string: str) -> tuple[float | None, float | Non
     lon = ddm_to_dd_or_pass(parts[1])
     
     return lat, lon
-def error_msg(e_nombre: str, missing_fields):
-    print(f"Estación '{e_nombre}' no tiene datos en: {', '.join(missing_fields)}")
 
 def transform_json(record: dict) -> dict:
     KEY_MAPPING = {
@@ -90,12 +90,12 @@ def transform_json(record: dict) -> dict:
             lat = ddm_to_dd_or_pass(parts[0]) # Función de conversión DDM/DD
             lon = ddm_to_dd_or_pass(parts[1])
             
+            if not check_coords(e_nombre, lat, lon): return None
+            
             transformed["latitud"] = lat # Clave nueva con datos transformados
             transformed["longitud"] = lon
         else:
-            error_msg(e_nombre, ["coordenadas"])
-            transformed["latitud"] = None
-            transformed["longitud"] = None
+            return None
 
     cod_postal = str(transformed.get("codigo_postal", None))
     if cod_postal:
@@ -103,10 +103,12 @@ def transform_json(record: dict) -> dict:
     else:
         error_msg(e_nombre, ["codigo_postal"])
         transformed["p_cod"] = None
+    if not check_postal_code(e_nombre, cod_postal):
+        return None
     return transformed
 
 def transformed_data_to_database():
-    data_list = csvtojson()
+    # Devuelve los campos que tienen valores (válidos), y los campos inválidos
     def filter_valid_fields(data: dict, required_fields: list) -> dict:
         valid = {}
         missing = []
@@ -118,12 +120,15 @@ def transformed_data_to_database():
                 missing.append(field)
         return valid, missing
 
+    data_list = csvtojson()
     with next(get_db()) as session:
         prov_cache = {}
         loc_cache = {}
         est_cache = {}
         for record in data_list:
             data = transform_json(record)
+            if not data: continue # Salta la iteración si no hay estación (si devuelve None por un fallo)
+            
             # Se obtiene aquí para evitar repetir código y de fallback desconocida pq es necesario para mensajes de error
             e_nombre = data.get("e_nombre", "Desconocida")
 

@@ -62,17 +62,17 @@ iei-itv/
 │   │   │   └── search.py    # API de Búsqueda (Solo lectura desde DB)
 │   │   └── dependencies.py  # Autenticación, configuración de API
 │   │
-│   ├── wrappers/            # Capa de Abstracción y Normalización
-│   │   ├── base.py          # Clase base/interfaz para los wrappers
-│   │   ├── gal.py
-│   │   ├── cat.py
-│   │   └── cv.py            # Consume 'utils/geo.py' si es necesario
+│   ├── wrappers/            # Capa de abstracción
+│   │   ├── wrapper_gal.py
+│   │   ├── wrapper_cat.py
+│   │   └── wrapper_cv.py
 │   │
-│   ├── extractors/          # Motor de Escritura y Orquestación
-│   │   ├── manager.py       # Lógica para elegir el extractor correcto
+│   ├── extractors/          # Capa de normalización de datos
 │   │   ├── gal_extractor.py
 │   │   ├── cat_extractor.py
 │   │   └── cv_extractor.py
+│   │
+│   ├── errors/              # Gestión de errores
 │   │
 │   └── database/            # Almacén de Datos (Single Source of Truth)
 │       ├── models.py        # Definición de tablas/documentos

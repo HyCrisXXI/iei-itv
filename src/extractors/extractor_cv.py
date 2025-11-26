@@ -200,6 +200,8 @@ def normalize_station_type(tipo: str | None) -> str:
 
     return cleaned if cleaned else "Otros"
 
+def error_msg(e_nombre: str, missing_fields):
+    print(f"Estación '{e_nombre}' no tiene datos en: {', '.join(missing_fields)}")
 
 
 def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
@@ -256,6 +258,18 @@ def transform_cv_record(record: dict, station_names_map: dict) -> dict | None:
         nombre_base = provincia or "Desconocida"
 
     transformed["nombre"] = f"ITV {nombre_base} SITVAL".strip()
+
+    # Validación de campos requeridos y mensajes de error
+    required_fields = [
+        "direccion", "codigo_postal", "lat", "lon", "horario", "contacto", "url"
+    ]
+    missing_fields = []
+    for field in required_fields:
+        value = transformed.get(field)
+        if value is None or value == "":
+            missing_fields.append(field)
+    if missing_fields:
+        error_msg(transformed.get("nombre", "Desconocida"), missing_fields)
 
     return transformed
 
