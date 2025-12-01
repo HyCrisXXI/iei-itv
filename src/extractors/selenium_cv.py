@@ -29,11 +29,10 @@ def validar_y_limpiar_entrada(direccion: str, municipio: str):
         raise ValueError("La dirección o el municipio no pueden estar vacíos.")
 
     # 4. Limpieza de ruido (s/n, s/ nº, etc.)
-    # Esto evita que Google se confunda con términos genéricos
     patron_sn = r'\b(s/nº?|s\.n\.?)\b'
     dir_clean = re.sub(patron_sn, '', dir_clean, flags=re.IGNORECASE).strip()
 
-    # 5. Longitud mínima de seguridad (opcional, evita búsquedas absurdas)
+    # 5. Longitud mínima de seguridad
     if len(dir_clean) < 2:
         raise ValueError(f"La dirección '{dir_clean}' es demasiado corta.")
 
@@ -70,8 +69,6 @@ def geolocate_google_selenium(driver, direccion: str, municipio: str):
     # Estrategia: "ITV" + Municipio + Dirección
     busqueda = f"ITV {mun_final}, {dir_final}"
     if "km" in dir_final.lower():
-        # Google maneja bien los Km, se lo pasamos tal cual, 
-        # pero a veces ayuda añadir "España" para que no busque en otro país
         busqueda += ", España"
 
     # --- FASE 3: Interacción con Selenium ---
@@ -80,21 +77,18 @@ def geolocate_google_selenium(driver, direccion: str, municipio: str):
     try:
         driver.get(url)
         
-        # Separamos esperas: corta para chequear cookies (rapidez), larga para carga de mapa (seguridad en conexión lenta)
+        # Espera corta para chequear cookies, larga para carga de mapa (seguridad en conexión lenta)
         wait_largo = WebDriverWait(driver, 10)
         wait_corto = WebDriverWait(driver, 2)
 
         # 1. Gestión de cookies (si aparece)
         try:
             # Busca el botón que contenga el texto "Aceptar todo" o "Accept all"
-            # Usamos wait_corto para no perder tiempo si ya están aceptadas
             accept_btn = wait_corto.until(EC.element_to_be_clickable(
                 (By.XPATH, "//button//span[contains(text(), 'Aceptar todo')] | //button//span[contains(text(), 'Accept all')]")
             ))
             accept_btn.click()
-            # Eliminamos el sleep fijo aquí, confiamos en el wait del siguiente paso
         except:
-            # Si no aparece el botón de cookies (ya aceptadas o sesión diferente), seguimos rápido
             pass
 
         # 2. Buscar
@@ -105,10 +99,9 @@ def geolocate_google_selenium(driver, direccion: str, municipio: str):
         search_box.send_keys(Keys.ENTER)
 
         # 3. Esperar a que la URL cambie
-        # Esperamos hasta que la URL contenga una arroba '@' (indicador de coords)
         wait_largo.until(EC.url_contains("@"))
         
-        # Damos un tiempo mínimo para que la URL se estabilice (a veces hace pan/zoom)
+        # Tiempo mínimo para que la URL se estabilice
         time.sleep(0.5) 
 
         # 4. Extraer Datos
@@ -149,7 +142,7 @@ if __name__ == "__main__":
 
     final_data = []
 
-    # Este try-finally también deberías hacerlo en extrator_cv.py (aunque cambiandolo un poco)
+    # Este try-finally debería añadirse tmb en extrator_cv.py (aunque cambiandolo un poco)
     try:
         for item in data:
             # Filtro básico

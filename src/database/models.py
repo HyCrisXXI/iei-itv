@@ -59,7 +59,7 @@ class Estacion(Base):
     url = Column(String)
 
     # Relación con Localidad (N Estaciones a 1 Localidad)
-    codigo_localidad = Column(Integer, ForeignKey('localidades.codigo'), nullable=False)
+    codigo_localidad = Column(Integer, ForeignKey('localidades.codigo'), nullable=True)
     localidad = relationship("Localidad", back_populates="estaciones", lazy="joined")
 
     # Origen de datos (ej. 'gal', 'cat', 'cv') para saber de dónde vino el registro

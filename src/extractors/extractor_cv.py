@@ -11,9 +11,6 @@ from database.session import get_db, create_db_and_tables
 import unicodedata
 from difflib import get_close_matches
 from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from extractors.selenium_cv import geolocate_google_selenium
 
@@ -87,62 +84,64 @@ def error_msg(e_nombre: str, missing_fields):
 
 
 
-def transform_cv_record(record: dict, station_names_map=None) -> dict | None:
+#Transforma los datos de cada estación del json
+def transform_cv_record(record: dict, driver=None) -> dict | None:
     tipo_raw = record.get("TIPO ESTACIÓN", "")
-    KEY_MAPPING = {
-        "TIPO ESTACIÓN": "tipo_estacion",
-        "DIRECCIÓN":     "direccion",
-        "C.POSTAL":      "codigo_postal",
-        "HORARIOS":      "horario",
-        "CORREO":        "contacto",
-        "MUNICIPIO":     "l_nombre",
-        "PROVINCIA":     "p_nombre"
+    tipo_estacion = normalize_station_type(tipo_raw)
+    
+    correo = record.get("CORREO")
+    url = extract_domain_from_email(correo)
+    horario = record.get("HORARIOS")
+    contacto = record.get("CORREO")
+    
+    # Campos comunes para fijas y no fijas
+    transformed = {
+        "tipo_estacion": tipo_estacion,
+        "horario": horario,
+        "contacto": contacto,
+        "url": url
     }
+    # Estos dos se usarán de distinta forma tanto en estaciones fijas como no fijas
+    direccion = record.get("DIRECCIÓN")
+    provincia = normalizar_provincia(record.get("PROVINCIA"))
+    
+    # Estaciones fijas: requieren todos los datos (salvo descripción)
+    if "fija" in tipo_estacion.lower():
+        municipio = record.get("MUNICIPIO")
+        codigo_postal = record.get("C.POSTAL")
+        cod_postal_string = str(codigo_postal) if codigo_postal else None
+        p_cod = cod_postal_string[:2] if cod_postal_string else None
 
-    transformed = {}
-    for old_key, new_key in KEY_MAPPING.items():
-        if old_key in record:
-            transformed[new_key] = record[old_key]
+        if not cod_postal_string:
+            print(f"Estación fija sin código postal, se descarta → {municipio} / {direccion}")
+            return None
 
+        lat, lon = geolocate_google_selenium(driver, direccion, municipio)
+        # Aquí solo comprueba lat, ya que el metodo geolocate, o devuelve los dos, o ninguno
+        if not lat:
+            print(f"No tiene localización → {municipio} / {direccion}")
+            return None
 
-    transformed["tipo_estacion"] = normalize_station_type(transformed.get("tipo_estacion") or tipo_raw)
-
-
-    cod_postal_string = str(transformed.get("codigo_postal", ""))
-    transformed["p_cod"] = cod_postal_string[:2] if cod_postal_string else None
-
-
-    correo = transformed.get("contacto")
-    transformed["url"] = extract_domain_from_email(correo)
-
-
-    provincia = normalizar_provincia(transformed.get("p_nombre"))
-    if provincia is None:
-        return None
-
-    # Geolocalización con Selenium + Google Maps
-    direccion = transformed.get("direccion")
-    municipio = transformed.get("l_nombre")
-
-    lat, lon = geolocate_google_selenium(driver, direccion, municipio)
-
-    if not lat or not lon:
-        print(f"No geolocaliza → {municipio} / {direccion}")
-        return None
-
-    transformed["lat"] = lat
-    transformed["lon"] = lon
-
-
-    transformed["nombre"] = build_station_name(municipio)
-
-
-    required_fields = ["direccion", "codigo_postal", "lat", "lon", "horario", "contacto", "url"]
-
-
-    missing = [f for f in required_fields if not transformed.get(f)]
-    if missing:
-        error_msg(transformed["nombre"], missing)
+        nombre = build_station_name(municipio)
+        transformed.update({
+            "nombre": nombre,
+            "direccion": direccion,
+            "codigo_postal": codigo_postal,
+            "p_cod": p_cod,
+            "l_nombre": municipio,
+            "p_nombre": provincia,
+            "lat": lat,
+            "lon": lon
+        })
+    else:
+        # No fijas: solo requieren dirección como nombre, tipo, horario, contacto, url y... direccion?
+        transformed.update({
+            "nombre": direccion,
+            # Aquí dudo si poner la provincia como dirección, ya q no se puede poner 
+            # directamente en la tabla provincia, al faltar la tabla intermedia localidad
+            # en estaciones que no son fijas
+            "direccion": provincia
+        })
 
     return transformed
 
@@ -160,10 +159,9 @@ def _map_tipo_enum(tipo_str: str) -> TipoEstacion:
 
 #Inserta los registros ya transformados en la base de datos
 #evitando duplicados y creando provincia/localidad si no existen
-def insert_transformed_to_db(transformed_list: list) -> tuple[int, int]:
-    create_db_and_tables()
-    inserted = 0
-    skipped = 0
+def insert_transformed_to_db(transformed_list: list) -> tuple[list, list]:
+    inserted = []
+    skipped = []
 
     with next(get_db()) as session:
         prov_cache = {}
@@ -171,71 +169,73 @@ def insert_transformed_to_db(transformed_list: list) -> tuple[int, int]:
         est_cache = {}
 
         for rec in transformed_list:
-            #transform_cv_record
-            raw_p_nombre = rec.get('p_nombre')
-            p_nombre = normalizar_provincia(raw_p_nombre)
-            l_nombre = rec.get('l_nombre')
-            p_cod = rec.get('p_cod')
             nombre = rec.get('nombre')
+            tipo = rec.get('tipo_estacion', '').lower()
+            motivo_skip = None
 
-            #Sin provincia no se crea nada
-            if not p_nombre:
-                print(f"Registro sin provincia válida, se descarta → {rec.get('direccion')}")
-                skipped += 1
-                continue
+            # Para fijas, requiere provincia y localidad
+            if "fija" in tipo:
+                p_nombre = normalizar_provincia(rec.get('p_nombre'))
+                l_nombre = rec.get('l_nombre')
+                p_cod = rec.get('p_cod')
 
-            # ---- PROVINCIA ----
-            prov = prov_cache.get(p_nombre)
-            if prov is None:
-                prov = session.query(Provincia).filter_by(nombre=p_nombre).first()
-                if not prov:
-                    prov = Provincia(
-                        nombre=p_nombre,
-                        codigo=int(p_cod) if p_cod else None
-                    )
-                    session.add(prov)
-                    session.flush()
-                prov_cache[p_nombre] = prov
+                # Si no hay provincia o localidad, se descarta
+                if not p_nombre:
+                    motivo_skip = "Estación sin provincia, no insertada"
+                elif not l_nombre:
+                    motivo_skip = "Estación sin localidad, no insertada"
 
-            #Sin municipio no hay localidad ni estación
-            if not l_nombre:
-                skipped += 1
-                continue
+                if motivo_skip:
+                    skipped.append((nombre, motivo_skip))
+                    continue
 
-            # ---- LOCALIDAD ----
-            loc_key = (l_nombre, prov.codigo)
-            loc = loc_cache.get(loc_key)
-            if loc is None:
-                loc = session.query(Localidad).filter_by(
-                    nombre=l_nombre, codigo_provincia=prov.codigo
-                ).first()
+                # ---- PROVINCIA ----
+                prov = prov_cache.get(p_nombre)
+                if prov is None:
+                    prov = session.query(Provincia).filter_by(nombre=p_nombre).first()
+                    if not prov:
+                        prov = Provincia(
+                            nombre=p_nombre,
+                            codigo=int(p_cod) if p_cod else None
+                        )
+                        session.add(prov)
+                        session.flush()
+                    prov_cache[p_nombre] = prov
+
+                # ---- LOCALIDAD ----
+                loc_key = (l_nombre, prov.codigo)
+                loc = loc_cache.get(loc_key)
                 if loc is None:
-                    loc = Localidad(nombre=l_nombre, codigo_provincia=prov.codigo)
-                    session.add(loc)
-                    session.flush()
-                loc_cache[loc_key] = loc
+                    loc = session.query(Localidad).filter_by(
+                        nombre=l_nombre, codigo_provincia=prov.codigo
+                    ).first()
+                    if loc is None:
+                        loc = Localidad(nombre=l_nombre, codigo_provincia=prov.codigo)
+                        session.add(loc)
+                        session.flush()
+                    loc_cache[loc_key] = loc
+            else:
+                prov = None
+                loc = None
 
             # ---- ESTACIÓN ----
-            # Si no viene nombre, se genera con el municipio
             if not nombre:
-                nombre = build_station_name(l_nombre)
-            if not nombre:
-                print(f"Estación sin nombre (municipio vacío), se descarta")
-                skipped += 1
+                skipped.append((nombre, "Estación sin nombre, no insertada"))
                 continue
 
-            est_key = (nombre, loc.codigo)
-            if est_key in est_cache or session.query(Estacion).filter_by(
-                nombre=nombre, codigo_localidad=loc.codigo
-            ).first():
-                print(f"Estación duplicada, no insertada → {nombre}")
-                skipped += 1
+            codigo_localidad = loc.codigo if loc else None
+
+            est_key = (nombre, codigo_localidad)
+            if est_key in est_cache or (codigo_localidad and session.query(Estacion).filter_by(
+                nombre=nombre, codigo_localidad=codigo_localidad
+            ).first()):
+                skipped.append((nombre, "Estación duplicada, no insertada"))
                 continue
 
             estacion = Estacion(
                 nombre=nombre,
                 tipo=_map_tipo_enum(rec.get('tipo_estacion')),
-                codigo_localidad=loc.codigo,
+                codigo_localidad=codigo_localidad,
                 origen_datos='cv',
                 direccion=rec.get('direccion'),
                 codigo_postal=int(rec.get('codigo_postal')) if rec.get('codigo_postal') else None,
@@ -247,56 +247,59 @@ def insert_transformed_to_db(transformed_list: list) -> tuple[int, int]:
             )
             session.add(estacion)
             est_cache[est_key] = estacion
-            inserted += 1
+            inserted.append(nombre)
 
         session.commit()
 
     return inserted, skipped
 
-if __name__ == "__main__":
+def save_transformed_to_json(transformed_list: list, out_path: Path = None):
+    if out_path is None:
+        out_path = Path(__file__).resolve().parent / "cv.json"
+    with out_path.open("w", encoding="utf-8") as jsonfile:
+        json.dump(transformed_list, jsonfile, indent=4, ensure_ascii=False)
 
+def process_and_transform_data(data_list: list, driver) -> list:
+    transformed_list = []
+    for item in data_list:
+        # municipio = item.get("MUNICIPIO", "")
+        # direccion = item.get("DIRECCIÓN", "")
+        # print(f"Procesando: {direccion}, {municipio}...")
+
+        rec = transform_cv_record(item, driver=driver)
+        if not rec:
+            # print(f"Registro descartado (provincia inválida o no geolocaliza si es fija) → {municipio}")
+            continue
+
+        transformed_list.append(rec)
+        print(f"Guardado {rec['nombre']}")
+    return transformed_list
+
+if __name__ == "__main__":
     data_list = jsontojson()
 
     options = webdriver.ChromeOptions()
     options.add_argument("--start-maximized")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    
     driver = webdriver.Chrome(options=options)
 
-    transformed_list = []
-
     try:
-        for item in data_list:
-            tipo = item.get("TIPO ESTACIÓN", "")
-            if "Móvil" in tipo or "Agrícola" in tipo:
-                continue
-
-            municipio = item.get("MUNICIPIO", "")
-            direccion = item.get("DIRECCIÓN", "")
-
-            print(f"Procesando: {direccion}, {municipio}...")
-
-            rec = transform_cv_record(item)
-
-            if rec is None:
-                print(f"Registro descartado (provincia inválida o no geolocaliza) → {municipio}")
-                continue
-
-
-            transformed_list.append(rec)
-            print(f"Guardado {rec['nombre']} ({rec['lat']}, {rec['lon']})")
-
+        transformed_list = process_and_transform_data(data_list, driver)
     finally:
         driver.quit()
 
     # Guardar el JSON ya transformado
-    out_path = Path(__file__).resolve().parent / "cv.json"
-    with out_path.open("w", encoding="utf-8") as jsonfile:
-        json.dump(transformed_list, jsonfile, indent=4, ensure_ascii=False)
+    save_transformed_to_json(transformed_list)
+    
+    print(f"Transformación: {len(data_list)} registros originales, {len(transformed_list)} transformados, {len(data_list) - len(transformed_list)} descartados en transformación.")
 
     # Automáticamente insertar en la base de datos
     try:
         inserted, skipped = insert_transformed_to_db(transformed_list)
-        print(f"DB insertion completed. Inserted: {inserted}, Skipped: {skipped}")
+        print(f"Insercción en BD completa. Insertados: {len(inserted)}, Saltados: {len(skipped)}")
+        if skipped:
+            print("Registros descartados en BD y motivo:")
+            for nombre, motivo in skipped:
+                print(f"  - {nombre}: {motivo}")
     except Exception as e:
-        print(f"Error inserting data into DB: {e}")
+        print(f"Error insertando datos en BD: {e}")
