@@ -211,6 +211,9 @@ def transformed_data_to_database(records: list | None = None):
             data = transform_itv_record(record)
 
             p_code = data.get("p_cod")
+            if p_code not in cpCat:
+                print(f"Omitiendo estación '{data.get('nombre', 'Desconocida')}' con código postal fuera de Cataluña: '{data.get('codigo_postal', 'Desconocido')}'")
+                continue
 
             prov_name = data.get("nombre_provincia")
             if prov_name not in provinciaCat:
