@@ -215,6 +215,15 @@ def transformed_data_to_database(records: list | None = None):
                 print(f"Omitiendo estación '{data.get('nombre', 'Desconocida')}' con código postal fuera de Cataluña: '{data.get('codigo_postal', 'Desconocido')}'")
                 continue
 
+            if mappingProvincia[p_code] != data.get("nombre_provincia"):
+                print(f"Advertencia: estación '{data.get('nombre', 'Desconocida')}' tiene provincia '{data.get('nombre_provincia', 'Desconocida')}' que no coincide con código postal '{data.get('codigo_postal', 'Desconocido')}' se ajustará el nombre de la provincia si es posible.")
+                if p_code in cpCat:
+                    data["nombre_provincia"] = mappingProvincia[p_code]
+                    print(f"Ajustando provincia de estación '{data.get('nombre', 'Desconocida')}' a '{data['nombre_provincia']}' según código postal.")
+                else:
+                    print(f"Omitiendo estación '{data.get('nombre', 'Desconocida')}' por inconsistencia en provincia y código postal.")
+                    continue
+
             prov_name = data.get("nombre_provincia")
             if prov_name not in provinciaCat:
                 if p_code in cpCat:
