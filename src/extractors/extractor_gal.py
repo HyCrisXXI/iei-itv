@@ -28,6 +28,7 @@ def csvtojson() -> list:
         data = [row for row in reader]
     return data
 
+# Si es ddm lo transforma a dd, si es dd no hace nada y si no devuelve None
 def ddm_to_dd_or_pass(s: str) -> float | None:
     s = s.strip()
     # Esto es necesario pq el simbolo º da error
@@ -49,6 +50,7 @@ def ddm_to_dd_or_pass(s: str) -> float | None:
             return None
     return None
 
+# Devuelve la coordenada separada en latitud (lat) y longitud (lon)
 def process_coordinate_pair(pair_string: str) -> tuple[float | None, float | None]:
     parts = [p.strip() for p in pair_string.split(',', 1)]
     
@@ -60,6 +62,7 @@ def process_coordinate_pair(pair_string: str) -> tuple[float | None, float | Non
     
     return lat, lon
 
+# transforma los datos de cada estacion del json
 def transform_json(record: dict) -> dict:
     KEY_MAPPING = {
         "NOME DA ESTACIÓN": "e_nombre",
@@ -107,6 +110,7 @@ def transform_json(record: dict) -> dict:
         return None
     return transformed
 
+# Sube a la BD los datos transformados
 def transformed_data_to_database():
     # Devuelve los campos que tienen valores (válidos), y los campos inválidos
     def filter_valid_fields(data: dict, required_fields: list) -> dict:

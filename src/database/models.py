@@ -50,7 +50,7 @@ class Estacion(Base):
     nombre = Column(String, nullable=False)
     tipo = Column(ChoiceType(TipoEstacion, impl=String()), nullable=False)
     direccion = Column(String)
-    codigo_postal = Column(Integer)
+    codigo_postal = Column(String)
     latitud = Column(Float)
     longitud = Column(Float)
     descripcion = Column(String)
