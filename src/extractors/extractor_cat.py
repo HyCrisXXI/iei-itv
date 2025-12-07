@@ -8,6 +8,8 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from database.models import TipoEstacion, Provincia, Localidad, Estacion
 from database.session import get_db
+from common.db_storage import save_stations
+from common.errors import error_msg
 
 provinciaCat = ["Tarragona", "Lleida", "Girona", "Barcelona"]
 
@@ -64,8 +66,8 @@ def xmltojson() -> list:
     return data
 POINT_RE = re.compile(r"POINT\s*\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*\)", re.IGNORECASE)
 
-def error_msg(e_nombre: str, missing_fields):
-    print(f"Estación '{e_nombre}' no tiene datos en: {', '.join(missing_fields)}")
+
+
 
 def _extract_value(value):
     if isinstance(value, dict):
@@ -152,7 +154,7 @@ def _safe_int(value) -> int | None:
     except (TypeError, ValueError):
         return None
 
-def transform_itv_record(record: dict) -> dict:
+def transform_cat_record(record: dict) -> dict:
     KEY_MAPPING = {
         "denominaci": "nombre",
         "adre_a": "direccion",
@@ -187,116 +189,74 @@ def transform_itv_record(record: dict) -> dict:
         codigo_postal = str(codigo_postal).strip()
         transformed["codigo_postal"] = codigo_postal or None
     transformed["p_cod"] = _province_code_from_postal(codigo_postal)
+    
+    # --- Validaciones unificadas ---
+    est_name = transformed.get("nombre")
+    p_code = transformed.get("p_cod")
+    
+    # 1. Validar Código Postal en Cataluña
+    if p_code not in cpCat:
+        return None 
+
+    # 2. Comprobar coincidencia entre Provincia y Código Postal
+    nom_prov = transformed.get("nombre_provincia")
+    
+    if mappingProvincia.get(p_code) != nom_prov:
+        if p_code in cpCat:
+            transformed["nombre_provincia"] = mappingProvincia[p_code]
+        else:
+            return None
+
+    # 3. Validar Nombre Provincia
+    prov_name = transformed.get("nombre_provincia")
+    if prov_name not in provinciaCat:
+        if p_code in cpCat:
+            prov_name = mappingProvincia[p_code]
+            transformed["nombre_provincia"] = prov_name
+        else:
+            error_msg(est_name or "Desconocida", ["nombre_provincia"])
+            return None
+            
+    if not prov_name:
+        return None
+
+    # Ajuste final de claves para la función de guardado común
+    transformed["nombre"] = "ITV " + (est_name or "")
+    transformed["p_nombre"] = transformed["nombre_provincia"]
+    transformed["l_nombre"] = transformed["nombre_localidad"]
+    
+    # Validar campos requeridos
+
+    required_fields = [
+        "direccion", "codigo_postal", "latitud", "longitud", "horario", "contacto", "url"
+    ]
+    missing = [f for f in required_fields if not transformed.get(f)]
+    if missing:
+        error_msg(transformed["nombre"], missing)
+        
     return transformed
 
 
 def transformed_data_to_database(records: list | None = None):
     data_list = records if records is not None else xmltojson()
-    def filter_valid_fields(data: dict, required_fields: list) -> dict:
-        valid = {}
-        missing = []
-        for field in required_fields:
-            value = data.get(field)
-            if value is not None and value != "":
-                valid[field] = value
-            else:
-                missing.append(field)
-        return valid, missing
-    with next(get_db()) as session:
-        prov_cache = {}
-        loc_cache = {}
-        est_cache = {}
+    
+    ready_data = []
+    for rec in data_list:
+        # Detectar si es registro crudo o ya transformado
+        if "p_nombre" in rec:
+            data = rec
+        else:
+            data = transform_cat_record(rec)
+            
+        if data:
+            ready_data.append(data)
 
-        for record in data_list:
-            data = transform_itv_record(record)
-
-            p_code = data.get("p_cod")
-            if p_code not in cpCat:
-                print(f"Omitiendo estación '{data.get('nombre', 'Desconocida')}' con código postal fuera de Cataluña: '{data.get('codigo_postal', 'Desconocido')}'")
-                continue
-
-            if mappingProvincia[p_code] != data.get("nombre_provincia"):
-                print(f"Advertencia: estación '{data.get('nombre', 'Desconocida')}' tiene provincia '{data.get('nombre_provincia', 'Desconocida')}' que no coincide con código postal '{data.get('codigo_postal', 'Desconocido')}' se ajustará el nombre de la provincia si es posible.")
-                if p_code in cpCat:
-                    data["nombre_provincia"] = mappingProvincia[p_code]
-                    print(f"Ajustando provincia de estación '{data.get('nombre', 'Desconocida')}' a '{data['nombre_provincia']}' según código postal.")
-                else:
-                    print(f"Omitiendo estación '{data.get('nombre', 'Desconocida')}' por inconsistencia en provincia y código postal.")
-                    continue
-
-            prov_name = data.get("nombre_provincia")
-            if prov_name not in provinciaCat:
-                if p_code in cpCat:
-                    prov_name = mappingProvincia[p_code]
-                    print(f"Ajustando provincia de estación '{data.get('nombre', 'Desconocida')}' de '{data.get('nombre_provincia', 'Desconocida')}' a '{prov_name}' según código postal.")
-                else:
-                    error_msg(data.get("nombre", "Desconocida"), ["nombre_provincia"])
-                    continue
-            if not prov_name:
-                continue
-            prov = prov_cache.get(prov_name)
-            prov_code_int = _safe_int(data.get("p_cod"))
-            if not prov:
-                query = session.query(Provincia)
-                if prov_code_int is not None:
-                    prov = query.filter_by(codigo=prov_code_int).first()
-                if not prov:
-                    prov = query.filter_by(nombre=prov_name).first()
-                if not prov:
-                    if prov_code_int is None:
-                        continue
-                    prov = Provincia(codigo=prov_code_int, nombre=prov_name)
-                    session.add(prov)
-                    session.flush()
-                prov_cache[prov_name] = prov
-
-            loc_name = data.get("nombre_localidad")
-            if not loc_name:
-                continue
-            loc_key = (loc_name, prov.codigo)
-            loc = loc_cache.get(loc_key)
-            if loc is None:
-                loc = session.query(Localidad).filter_by(nombre=loc_name, codigo_provincia=prov.codigo).first()
-                if loc is None:
-                    loc = Localidad(nombre=loc_name, codigo_provincia=prov.codigo)
-                    session.add(loc)
-                    session.flush()
-                loc_cache[loc_key] = loc
-
-            est_name = "ITV " + data.get("nombre")
-            if not est_name:
-                continue
-            est_key = (est_name, loc.codigo)
-            if est_key in est_cache:
-                continue
-            est = session.query(Estacion).filter_by(nombre=est_name, codigo_localidad=loc.codigo).first()
-            if est:
-                est_cache[est_key] = est
-                continue
-
-            # Solo sube los campos que tengan datos
-            required_fields = [
-                "direccion", "codigo_postal", "latitud", "longitud", "horario", "contacto", "url"
-            ]
-            valid_fields, missing_fields = filter_valid_fields(data, required_fields)
-            if missing_fields:
-                error_msg(est_name, missing_fields)
-
-            estacion = Estacion(
-                nombre=est_name,
-                tipo=TipoEstacion.Estacion_fija,
-                codigo_localidad=loc.codigo,
-                origen_datos="cat",
-                **valid_fields
-            )
-            session.add(estacion)
-            est_cache[est_key] = estacion
-
-        session.commit()
+    stats = save_stations(ready_data, "cat")
+    print(f"Inserción completa. Insertados: {stats['inserted']}, Omitidos: {stats['skipped']}, Errores: {len(stats['errors'])}")
 
 if __name__ == "__main__":
     data_list = xmltojson()
-    transformed_data = [transform_itv_record(record) for record in data_list]
+    transformed_data = [transform_cat_record(record) for record in data_list]
     out_path = Path(__file__).resolve().parent / "cat.json"
     with out_path.open("w", encoding="utf-8") as jsonfile:
         json.dump(transformed_data, jsonfile, indent=4, ensure_ascii=False) # minify: indent=None, separators=(",", ":")

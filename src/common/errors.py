@@ -17,30 +17,38 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger("extractor_gal")
+logger = logging.getLogger("extractor")
 
 def error_msg(e_nombre: str, missing_fields: list):
-    logger.warning(f"Estación '{e_nombre}' no tiene datos en: {', '.join(missing_fields)}")
+    logger.error(f"Estación '{e_nombre}' incompleta -> {', '.join(missing_fields)}")
 
 def check_postal_code(e_nombre: str, codigo_postal_str: str) -> bool:
     # Comprueba que el codigo postal sea cifras y tenga 5
     if not (len(codigo_postal_str) == 5 and codigo_postal_str.isdigit()):
-        logger.error(f"El código postal de la estación '{e_nombre}' no cumple los parámetros aceptables")
+        logger.error(f"Estación '{e_nombre}' descartada -> Código postal '{codigo_postal_str}' inválido (longitud/formato)")
         return False
     
     codigo_postal_int = int(codigo_postal_str)
     # Comprueba que el codigo postal este en el rango aceptado en España
     if not (0 <= codigo_postal_int <= 52999):
-        logger.error(f"El código postal de la estación '{e_nombre}' no está entre 00000 y 52999")
+        logger.error(f"Estación '{e_nombre}' descartada -> Código postal '{codigo_postal_str}' fuera de rango (0-52999)")
         return False
     return True      
 
-def check_coords(e_nombre: str, lat: str, lon: str) -> bool:
-    lat = int(lat)
+def check_coords(e_nombre: str, lat: float, lon: float) -> bool:
+    # lat/lon son floats ya convertidos usualmente, o strings validados antes
+    # Gal pasa float.
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (ValueError, TypeError):
+        logger.error(f"Estación '{e_nombre}' descartada -> Coordenadas inválidas")
+        return False
+
     if not (-90 <= lat <= 90):
-        logger.error(f"La latitud de la estación '{e_nombre}' no está entre -90º y 90º")
+        logger.error(f"Estación '{e_nombre}' descartada -> Latitud {lat} fuera de rango (-90 a 90)")
         return False
     if not (-180 <= lon <= 180):
-        logger.error(f"La longitud de la estación '{e_nombre}' no está entre -180º y 180º")
+        logger.error(f"Estación '{e_nombre}' descartada -> Longitud {lon} fuera de rango (-180 a 180)")
         return False
     return True
