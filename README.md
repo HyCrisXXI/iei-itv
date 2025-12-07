@@ -49,6 +49,27 @@ Luego, activa el entorno virtual:
 ```bash
 pip install -r requirements.txt
 ```
+
+## Cómo ejecutar la API y los extractores
+
+### Lanzar la API REST (FastAPI)
+
+En una terminal (desde la raiz del proyecto), ejecuta:
+
+```bash
+uvicorn src.api.main:app --reload
+```
+
+Esto arrancará el servidor en http://127.0.0.1:8000. Puedes ver la documentación interactiva en http://127.0.0.1:8000/docs
+
+### Ejecutar los extractores
+
+En otra terminal (con la API ya arrancada), ejecuta el extractor que desees. Por ejemplo, para Galicia:
+
+```bash
+python src/extractors/extractor_gal.py
+```
+
 ## Estructura
 
 La estructura principal del proyecto sigue un diseño modular:
@@ -60,7 +81,7 @@ iei-itv/
 │   │   ├── routes/
 │   │   │   ├── load.py      # API de Carga (Recibe manual y redirige a Extractors)
 │   │   │   └── search.py    # API de Búsqueda (Solo lectura desde DB)
-│   │   └── dependencies.py  # Autenticación, configuración de API
+│   │   ├── wrappers/        # APIs de los wrappers
 │   │
 │   ├── wrappers/            # Capa de abstracción
 │   │   ├── wrapper_gal.py
@@ -72,7 +93,7 @@ iei-itv/
 │   │   ├── cat_extractor.py
 │   │   └── cv_extractor.py
 │   │
-│   ├── errors/              # Gestión de errores
+│   ├── common/              # Funciones comunes para los extractors
 │   │
 │   └── database/            # Almacén de Datos (Single Source of Truth)
 │       ├── models.py        # Definición de tablas/documentos

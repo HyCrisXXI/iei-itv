@@ -2,31 +2,17 @@
 import sys
 import re
 import json
+import requests
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-# from wrappers.wrapper_gal import csvtojson
 from database.models import TipoEstacion, Provincia, Localidad, Estacion
 from database.session import get_db
 
-from errors.errors import error_msg, check_postal_code, check_coords
+from common.errors import error_msg, check_postal_code, check_coords
+from common.dependencies import get_api_data
 
-import csv # Temporal
 
 DD_REGEX = re.compile(r"^[+-]?\d+(\.\d+)?$")
-
-# Función temporal para la primera entrega
-def csvtojson() -> list:
-    csv_path = (
-        Path(__file__).resolve()
-        .parent.parent.parent / "data" / "Estacions_ITV.csv"
-    )
-    if not csv_path.exists():
-        raise FileNotFoundError(f"Estacions_ITV.csv not found at: {csv_path}")
-
-    with csv_path.open("r", encoding="ISO-8859-1") as csvfile:
-        reader = csv.DictReader(csvfile, delimiter=';')
-        data = [row for row in reader]
-    return data
 
 # Si es ddm lo transforma a dd, si es dd no hace nada y si no devuelve None
 def ddm_to_dd_or_pass(s: str) -> float | None:
@@ -111,7 +97,7 @@ def transform_json(record: dict) -> dict:
     return transformed
 
 # Sube a la BD los datos transformados
-def transformed_data_to_database():
+def transformed_data_to_database(record: dict):
     # Devuelve los campos que tienen valores (válidos), y los campos inválidos
     def filter_valid_fields(data: dict, required_fields: list) -> dict:
         valid = {}
@@ -124,7 +110,6 @@ def transformed_data_to_database():
                 missing.append(field)
         return valid, missing
 
-    data_list = csvtojson()
     with next(get_db()) as session:
         prov_cache = {}
         loc_cache = {}
@@ -211,12 +196,14 @@ def transformed_data_to_database():
         session.commit()
 
 if __name__ == "__main__":
+    # Recupera datos de la API
+    data_list = get_api_data("gal")
+
     # Normaliza datos a json (solo debug)
-    data_list = csvtojson()
     transformed_data = [transform_json(record) for record in data_list]
     out_path = Path(__file__).resolve().parent / "gal.json"
     with out_path.open("w", encoding="utf-8") as jsonfile:
         json.dump(transformed_data, jsonfile, indent=4, ensure_ascii=False)
     
     # Sube datos a la BD (Independiente de lo anterior)
-    transformed_data_to_database()
+    transformed_data_to_database(data_list)

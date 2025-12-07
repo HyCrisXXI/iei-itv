@@ -1,3 +1,5 @@
+fastapi
+uvicorn
 attrs==25.4.0
 beautifulsoup4==4.14.2
 bs4==0.0.2
