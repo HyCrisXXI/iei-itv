@@ -81,25 +81,24 @@ iei-itv/
 │   │   ├── routes/
 │   │   │   ├── load.py      # API de Carga (Recibe manual y redirige a Extractors)
 │   │   │   └── search.py    # API de Búsqueda (Solo lectura desde DB)
-│   │   ├── wrappers/        # APIs de los wrappers
+│   │   └── main.py          # APIs de los wrappers
+│   │
+│   ├── common/              # Funciones comunes para los extractors
+│   │
+│   ├── database/            # Almacén de Datos (Single Source of Truth)
+│   │   ├── models.py        # Definición de tablas/documentos
+│   │   ├── session.py       # Conexión a la DB
+│   │   └── config.py        # Variables de entorno y configuración global
 │   │
 │   ├── wrappers/            # Capa de abstracción
 │   │   ├── wrapper_gal.py
 │   │   ├── wrapper_cat.py
 │   │   └── wrapper_cv.py
 │   │
-│   ├── extractors/          # Capa de normalización de datos
-│   │   ├── gal_extractor.py
-│   │   ├── cat_extractor.py
-│   │   └── cv_extractor.py
-│   │
-│   ├── common/              # Funciones comunes para los extractors
-│   │
-│   └── database/            # Almacén de Datos (Single Source of Truth)
-│       ├── models.py        # Definición de tablas/documentos
-│       ├── session.py       # Conexión a la DB
-│       ├── repository.py    # Funciones CRUD (Create, Read, Update, Delete)
-│       └── config.py        # Variables de entorno y configuración global
+│   └── extractors/          # Capa de normalización de datos
+│       ├── gal_extractor.py
+│       ├── cat_extractor.py
+│       └── cv_extractor.py
 │
 ├── main.py                  # Punto de entrada de la aplicación
 ├── .env.example             # Plantilla para las variables de entorno
