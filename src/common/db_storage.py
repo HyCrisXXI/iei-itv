@@ -38,7 +38,7 @@ def save_stations(stations_data: list[dict], source_tag: str) -> dict:
     stats = {
         "processed": 0,
         "inserted": 0,
-        "skipped": 0,
+        "duplicates": 0,
         "errors": []
     }
 
@@ -53,7 +53,7 @@ def save_stations(stations_data: list[dict], source_tag: str) -> dict:
             nombre = data.get("nombre")
             # Verificación de seguridad para evitar errores al comprometer la base de datos
             if not nombre:
-                stats["skipped"] += 1
+                stats["errors"].append("Nombre vacío")
                 continue
 
             p_nombre = data.get("p_nombre")
@@ -100,7 +100,7 @@ def save_stations(stations_data: list[dict], source_tag: str) -> dict:
             est_key = (nombre, loc_cod)
             
             if est_key in est_cache:
-                stats["skipped"] += 1
+                stats["duplicates"] += 1
                 continue
             
             # Check DB
@@ -113,7 +113,7 @@ def save_stations(stations_data: list[dict], source_tag: str) -> dict:
             est = query_est.first()
             if est:
                 est_cache[est_key] = est
-                stats["skipped"] += 1
+                stats["duplicates"] += 1
                 continue
 
             estacion = Estacion(

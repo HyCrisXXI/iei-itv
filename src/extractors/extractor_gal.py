@@ -1,18 +1,15 @@
 # src/extractors/extractor_gal.py
 import sys
 import re
-import json
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from database.models import TipoEstacion, Provincia, Localidad, Estacion
-from database.session import get_db
 
 from common.errors import error_msg, check_postal_code, check_coords
-from common.dependencies import get_api_data, save_transformed_to_json
-from common.db_storage import save_stations
+from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
 
 
 DD_REGEX = re.compile(r"^[+-]?\d+(\.\d+)?$")
+
 
 # Si es ddm lo transforma a dd, si es dd no hace nada y si no devuelve None
 def ddm_to_dd_or_pass(s: str) -> float | None:
@@ -36,6 +33,7 @@ def ddm_to_dd_or_pass(s: str) -> float | None:
             return None
     return None
 
+
 # Devuelve la coordenada separada en latitud (lat) y longitud (lon)
 def process_coordinate_pair(pair_string: str) -> tuple[float | None, float | None]:
     parts = [p.strip() for p in pair_string.split(',', 1)]
@@ -48,18 +46,19 @@ def process_coordinate_pair(pair_string: str) -> tuple[float | None, float | Non
     
     return lat, lon
 
+
 # transforma los datos de cada estacion del json
 def transform_gal_record(record: dict) -> dict:
     KEY_MAPPING = {
         "NOME DA ESTACIÓN": "nombre",
         "ENDEREZO": "direccion",
-        "CONCELLO": "l_nombre",
         "CÓDIGO POSTAL": "codigo_postal",
-        "PROVINCIA": "p_nombre",
+        "COORDENADAS GMAPS": "coordenadas", # Clave temporal para procesar coords
         "HORARIO": "horario",
-        "SOLICITUDE DE CITA PREVIA": "url",
         "CORREO ELECTRÓNICO": "contacto",
-        "COORDENADAS GMAPS": "coordenadas" # Clave temporal para procesar coords
+        "SOLICITUDE DE CITA PREVIA": "url",
+        "CONCELLO": "l_nombre",
+        "PROVINCIA": "p_nombre"
     }
     
     transformed = {} # Claves estandarizadas
@@ -113,18 +112,33 @@ def transform_gal_record(record: dict) -> dict:
 
     return transformed
 
-# Sube a la BD los datos transformados
-def transformed_data_to_database(records: list):
-    stats = save_stations(records, "gal")
-    print(f"Inserción completa. Insertados: {stats['inserted']}, Omitidos: {stats['skipped']}, Errores: {len(stats['errors'])}")
+
+def transform_gal_data(data_list: list[dict]) -> list[dict]:
+    transformed_data = []
+    stats_trans = {"total": 0, "valid": 0, "invalid": 0}
+
+    for record in data_list:
+        stats_trans["total"] += 1
+        res = transform_gal_record(record)
+        if res:
+            transformed_data.append(res)
+            stats_trans["valid"] += 1
+        else:
+            stats_trans["invalid"] += 1
+            
+    print(f"Transformación GAL: Total {stats_trans['total']}, Válidos {stats_trans['valid']}, Inválidos {stats_trans['invalid']}")
+    return transformed_data
+
 
 if __name__ == "__main__":
     # Recupera datos de la API
     data_list = get_api_data("gal")
 
-    # Normaliza datos a json (solo debug)
-    transformed_data = [transform_gal_record(record) for record in data_list]
+    # Transforma datos
+    transformed_data = transform_gal_data(data_list)
+
+    # Guarda datos transformados a json (solo debug)
     save_transformed_to_json(transformed_data, "gal")
 
     # Sube datos a la BD (Independiente de lo anterior)
-    transformed_data_to_database(transformed_data)
+    transformed_data_to_database(transformed_data, "gal")

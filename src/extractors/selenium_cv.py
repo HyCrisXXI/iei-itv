@@ -7,7 +7,6 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import re
 import sys
-import json
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
@@ -118,56 +117,3 @@ def geolocate_google_selenium(driver, direccion: str, municipio: str):
     except Exception as e:
         print(f"   [!] Error buscando '{busqueda}': {e}")
         return None, None
-
-# De aquí hacia abajo solo sirve para probar funcionamiento, la caja negra está arriba
-
-def jsontojson():
-    path = Path(__file__).resolve().parent.parent.parent / "data" / "estaciones.json"
-    if not path.exists(): return []
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-if __name__ == "__main__":
-    data = jsontojson()
-
-    # Configuración de Selenium (esto se tiene que hacer en extractor_cv.py)
-    options = webdriver.ChromeOptions()
-    # options.add_argument("--headless=new") # Modo invisible
-    # options.add_argument("--start-minimized") # Modo minimizado
-    options.add_argument("--start-maximized") # Modo maximizado
-    options.add_argument("--disable-blink-features=AutomationControlled") 
-    
-    driver = webdriver.Chrome(options=options)
-    # Fin configuración selenium
-
-    final_data = []
-
-    # Este try-finally debería añadirse tmb en extrator_cv.py (aunque cambiandolo un poco)
-    try:
-        for item in data:
-            # Filtro básico
-            tipo = item.get("TIPO ESTACIÓN", "")
-            if "Móvil" in tipo or "Agrícola" in tipo:
-                continue # No buscamos direcciones móviles o agrícolas
-
-            municipio = item.get("MUNICIPIO", "")
-            direccion = item.get("DIRECCIÓN", "")
-            
-            print(f"Procesando: {direccion}, {municipio}...")
-            
-            # Llamada a la caja negra
-            lat, lon = geolocate_google_selenium(driver, direccion, municipio)
-            
-            if lat and lon:
-                item["latitud"] = lat
-                item["longitud"] = lon
-                final_data.append(item)
-            else:
-                print(f"   [FALLO] No encontrado o inválido: {municipio}")
-    finally:
-        driver.quit()
-
-    # Guardar
-    out = Path(__file__).resolve().parent / "cv_google.json"
-    with out.open("w", encoding="utf-8") as f:
-        json.dump(final_data, f, indent=4, ensure_ascii=False)

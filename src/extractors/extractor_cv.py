@@ -1,40 +1,18 @@
 # src/extractors/extractor_cv.py
-import sys
-import json
-from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-from geopy.geocoders import Nominatim
-import time
-import re
-from database.models import TipoEstacion, Provincia, Localidad, Estacion
-from database.session import get_db, create_db_and_tables
 import unicodedata
+import sys
 from difflib import get_close_matches
 from selenium import webdriver
-from selenium.webdriver.support import expected_conditions as EC
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 from extractors.selenium_cv import geolocate_google_selenium
-from common.db_storage import save_stations
+from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
 from common.errors import error_msg
-
-
-def jsontojson():
-    json_path = (
-        Path(__file__).resolve()
-        .parent.parent.parent / "data" / "estaciones.json"
-    )
-    
-    if not json_path.exists():
-        raise FileNotFoundError(f"estaciones.json not found at: {json_path}")
-    
-    with json_path.open("r", encoding="utf-8") as jsonfile:
-        data = json.load(jsonfile)
-    
-    return data
-
-
 
 #Normaliza provincias automáticamente corrigiendo errores
 PROVINCIAS_VALIDAS = ["valencia","alicante","castellon"]
+
 
 def normalizar_provincia(nombre: str | None) -> str | None:
     if not nombre:
@@ -53,14 +31,11 @@ def normalizar_provincia(nombre: str | None) -> str | None:
     return None
 
 
-
 #Construye el nombre final de la estación basado en municipio o provincia
 def build_station_name(municipio: str | None) -> str | None:
     if not municipio or not municipio.strip():
         return None
     return f"ITV {municipio.strip()} SITVAL"
-
-
 
 
 #Limpia el texto del tipo de estación
@@ -71,13 +46,11 @@ def normalize_station_type(tipo: str | None) -> str:
     return cleaned if cleaned else "Otros"
 
 
-
 #Extrae dominio de un email
 def extract_domain_from_email(email: str) -> str | None:
     if not email or "@" not in email:
         return None
     return email.split("@", 1)[1]
-
 
 
 #Transforma los datos de cada estación del json
@@ -157,39 +130,41 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
     
     return transformed
 
-def process_and_transform_data(data_list: list, driver) -> list:
-    transformed_list = []
-    for item in data_list:
 
-        rec = transform_cv_record(item, driver=driver)
-        if not rec:
-            continue
-
-        transformed_list.append(rec)
-        print(f"Guardado {rec['nombre']}")
-    return transformed_list
-
-if __name__ == "__main__":
-    data_list = jsontojson()
-
+def transform_cv_data(data_list: list) -> list:
     options = webdriver.ChromeOptions()
     options.add_argument("--start-maximized")
     options.add_argument("--disable-blink-features=AutomationControlled")
     driver = webdriver.Chrome(options=options)
-
     try:
-        transformed_list = process_and_transform_data(data_list, driver)
+        transformed_data = []
+        stats_trans = {"total": 0, "valid": 0, "invalid": 0}
+        
+        for record in data_list:
+            stats_trans["total"] += 1
+            res = transform_cv_record(record, driver=driver)
+            if res:
+                transformed_data.append(res)
+                stats_trans["valid"] += 1
+            else:
+                stats_trans["invalid"] += 1
+        
+        print(f"Transformación CV: Total {stats_trans['total']}, Válidos {stats_trans['valid']}, Inválidos {stats_trans['invalid']}")
     finally:
         driver.quit()
-
-    # Guardar el JSON ya transformado
-    save_transformed_to_json(transformed_list, "cv")
     
-    print(f"Transformación: {len(data_list)} registros originales, {len(transformed_list)} transformados, {len(data_list) - len(transformed_list)} descartados en transformación.")
+    return transformed_data
 
-    # Automáticamente insertar en la base de datos
-    try:
-        stats = save_stations(transformed_list, "cv")
-        print(f"Insercción en BD completa. Insertados: {stats['inserted']}, Saltados: {stats['skipped']}")
-    except Exception as e:
-        print(f"Error insertando datos en BD: {e}")
+
+if __name__ == "__main__":
+    # Recupera datos de la API
+    data_list = get_api_data("cv")
+
+    # Transforma datos
+    transformed_data = transform_cv_data(data_list)
+
+    # Guarda datos transformados a json (solo debug)
+    save_transformed_to_json(transformed_data, "cv")
+
+    # Sube datos a la BD (Independiente de lo anterior)
+    transformed_data_to_database(transformed_data, "cv")

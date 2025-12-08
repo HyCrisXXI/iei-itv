@@ -1,14 +1,12 @@
 # src/extractors/extractor_cat.py
+import re
 import sys
 import xml.etree.ElementTree as ET
-import json
-import re
+
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from database.models import TipoEstacion, Provincia, Localidad, Estacion
-from database.session import get_db
-from common.db_storage import save_stations
+from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
 from common.errors import error_msg
 
 provinciaCat = ["Tarragona", "Lleida", "Girona", "Barcelona"]
@@ -22,51 +20,7 @@ mappingProvincia = {
     "43": "Tarragona",
 }
 
-
-def xmltojson() -> list:
-    xml_path = (
-        Path(__file__).resolve()
-        .parent.parent.parent / "data" / "ITV-CAT.xml"
-    )
-
-    if not xml_path.exists():
-        raise FileNotFoundError(f"ITV-CAT.xml not found at: {xml_path}")
-
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-
-    if (
-        len(root) == 1
-        and root[0].tag == "row"
-        and all(child.tag == "row" for child in root[0])
-    ):
-        rows = root[0].findall("row")
-    else:
-        rows = root.findall("row")
-
-    data = []
-    for row in rows:
-        record = {}
-        # añade elementos tipo (_id, _uuid, etc.)
-        record.update(row.attrib)
-
-        for child in row:
-            if list(child.attrib.keys()) == ["url"] and (not child.text or not child.text.strip()):
-                record[child.tag] = child.attrib["url"]
-            elif child.attrib:
-                entry = dict(child.attrib)
-                if child.text and child.text.strip():
-                    entry["text"] = child.text.strip()
-                record[child.tag] = entry
-            else:
-                record[child.tag] = child.text.strip() if child.text else None
-        if record:
-            data.append(record)
-
-    return data
 POINT_RE = re.compile(r"POINT\s*\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*\)", re.IGNORECASE)
-
-
 
 
 def _extract_value(value):
@@ -148,25 +102,18 @@ def _province_code_from_postal(postal) -> str | None:
     return None
 
 
-def _safe_int(value) -> int | None:
-    try:
-        return int(str(value))
-    except (TypeError, ValueError):
-        return None
-
 def transform_cat_record(record: dict) -> dict:
     KEY_MAPPING = {
         "denominaci": "nombre",
         "adre_a": "direccion",
         "cp": "codigo_postal",
-        "long": "longitud",
         "lat": "latitud",
+        "long": "longitud",
         "horari_de_servei": "horario",
         "correu_electr_nic": "contacto",
         "web": "url",
-        "codi_municipi": "codigo_localidad",
-        "municipi": "nombre_localidad",
-        "serveis_territorials": "nombre_provincia",
+        "municipi": "l_nombre",
+        "serveis_territorials": "p_nombre"
     }
     
     transformed = {} # Claves estandarizadas
@@ -196,34 +143,35 @@ def transform_cat_record(record: dict) -> dict:
     
     # 1. Validar Código Postal en Cataluña
     if p_code not in cpCat:
+        error_msg(est_name or "Desconocida", [f"codigo_postal ({p_code}) fuera de rango CAT"])
         return None 
 
     # 2. Comprobar coincidencia entre Provincia y Código Postal
-    nom_prov = transformed.get("nombre_provincia")
+    nom_prov = transformed.get("p_nombre")
     
     if mappingProvincia.get(p_code) != nom_prov:
         if p_code in cpCat:
-            transformed["nombre_provincia"] = mappingProvincia[p_code]
+            transformed["p_nombre"] = mappingProvincia[p_code]
         else:
+            error_msg(est_name or "Desconocida", [f"Provincia ({nom_prov}) no coincide con código postal ({p_code})"])
             return None
 
     # 3. Validar Nombre Provincia
-    prov_name = transformed.get("nombre_provincia")
+    prov_name = transformed.get("p_nombre")
     if prov_name not in provinciaCat:
         if p_code in cpCat:
             prov_name = mappingProvincia[p_code]
-            transformed["nombre_provincia"] = prov_name
+            transformed["p_nombre"] = prov_name
         else:
-            error_msg(est_name or "Desconocida", ["nombre_provincia"])
+            error_msg(est_name or "Desconocida", ["p_nombre"])
             return None
             
     if not prov_name:
+        error_msg(est_name or "Desconocida", ["Provincia no identificada"])
         return None
 
     # Ajuste final de claves para la función de guardado común
     transformed["nombre"] = "ITV " + (est_name or "")
-    transformed["p_nombre"] = transformed["nombre_provincia"]
-    transformed["l_nombre"] = transformed["nombre_localidad"]
     
     # Validar campos requeridos
 
@@ -237,28 +185,32 @@ def transform_cat_record(record: dict) -> dict:
     return transformed
 
 
-def transformed_data_to_database(records: list | None = None):
-    data_list = records if records is not None else xmltojson()
-    
-    ready_data = []
-    for rec in data_list:
-        # Detectar si es registro crudo o ya transformado
-        if "p_nombre" in rec:
-            data = rec
-        else:
-            data = transform_cat_record(rec)
-            
-        if data:
-            ready_data.append(data)
+def transform_cat_data(data_list: list) -> list:
+    transformed_data = []
+    stats_trans = {"total": 0, "valid": 0, "invalid": 0}
 
-    stats = save_stations(ready_data, "cat")
-    print(f"Inserción completa. Insertados: {stats['inserted']}, Omitidos: {stats['skipped']}, Errores: {len(stats['errors'])}")
+    for record in data_list:
+        stats_trans["total"] += 1
+        res = transform_cat_record(record)
+        if res:
+            transformed_data.append(res)
+            stats_trans["valid"] += 1
+        else:
+            stats_trans["invalid"] += 1
+            
+    print(f"Transformación CAT: Total {stats_trans['total']}, Válidos {stats_trans['valid']}, Inválidos {stats_trans['invalid']}")
+    return transformed_data
+
 
 if __name__ == "__main__":
-    data_list = xmltojson()
-    transformed_data = [transform_cat_record(record) for record in data_list]
-    out_path = Path(__file__).resolve().parent / "cat.json"
-    with out_path.open("w", encoding="utf-8") as jsonfile:
-        json.dump(transformed_data, jsonfile, indent=4, ensure_ascii=False) # minify: indent=None, separators=(",", ":")
+    # Recupera datos de la API  
+    data_list = get_api_data("cat")
+    
+    # Transforma datos
+    transformed_data = transform_cat_data(data_list)
 
-    transformed_data_to_database(data_list)
+    # Guarda datos transformados a json (solo debug)
+    save_transformed_to_json(transformed_data, "cat")
+
+    # Sube datos a la BD (Independiente de lo anterior)
+    transformed_data_to_database(transformed_data, "cat")
