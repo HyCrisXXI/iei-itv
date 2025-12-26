@@ -471,16 +471,23 @@ class ITVSearchApp:
                 est.get('descripcion', 'N/A') or 'N/A',
             ))
         
-        # Add markers to map (simple markers without click handlers)
-        for est in self.results:
+        # Add markers to map with click handlers
+        for idx, est in enumerate(self.results):
             lat = est.get('latitud')
             lon = est.get('longitud')
             if lat and lon:
+                # Create closure to capture est value
+                def make_click_handler(station):
+                    def handler(marker):
+                        self._on_marker_click(station)
+                    return handler
+                
                 marker = self.map_widget.set_marker(
                     lat, lon,
                     text="",
                     marker_color_circle="#C02720",
-                    marker_color_outside="#EA4335"
+                    marker_color_outside="#EA4335",
+                    command=make_click_handler(est)
                 )
                 self.markers.append(marker)
         
@@ -576,6 +583,22 @@ class ITVSearchApp:
                 if lat and lon:
                     self.map_widget.set_position(lat, lon)
                     self.map_widget.set_zoom(14)
+                break
+    
+    def _on_marker_click(self, station):
+        """Handle marker click - highlight corresponding row in table."""
+        nombre = station.get('nombre')
+        if not nombre:
+            return
+        
+        # Find and select the corresponding row in the table
+        for item_id in self.tree.get_children():
+            item = self.tree.item(item_id)
+            if item['values'] and item['values'][0] == nombre:
+                # Select and scroll to the row
+                self.tree.selection_set(item_id)
+                self.tree.see(item_id)
+                self.tree.focus(item_id)
                 break
                 
     def run(self):
