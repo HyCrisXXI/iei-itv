@@ -15,14 +15,18 @@ DD_REGEX = re.compile(r"^[+-]?\d+(\.\d+)?$")
 def ddm_to_dd_or_pass(s: str) -> float | None:
     s = s.strip()
     # Esto es necesario pq el simbolo º da error
-    ddm_extract_pattern = r"^([+-]?\d+)[\u00B0\s]+(\d+\.\d+)['\"]?$"
+    ddm_extract_pattern = r"^([+-]?\d+)[\u00B0\s]+(\d+\.?\d*)['\"]?$"
     match_groups = re.match(ddm_extract_pattern, s)
     
     if match_groups:
         try:
             degrees = float(match_groups.group(1))
             minutes = float(match_groups.group(2))
-            return round(degrees + minutes / 60, 6)
+            # Para coordenadas negativas, los minutos también deben ser negativos
+            if degrees < 0:
+                return round(degrees - minutes / 60, 6)
+            else:
+                return round(degrees + minutes / 60, 6)
         except ValueError:
             return None
     
