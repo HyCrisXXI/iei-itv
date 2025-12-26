@@ -1,6 +1,7 @@
 # src/api/routes/search.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import cast, String
 from typing import Optional
 
 from src.database.session import get_db
@@ -73,7 +74,7 @@ async def search_stations(
         query = query.filter(Provincia.nombre.ilike(f"%{provincia}%"))
     
     if tipo:
-        query = query.filter(Estacion.tipo.ilike(f"%{tipo}%"))
+        query = query.filter(cast(Estacion.tipo, String).ilike(f"%{tipo}%"))
     
     # Ejecutar consulta
     estaciones = query.all()
