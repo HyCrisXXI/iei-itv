@@ -8,20 +8,21 @@ from src.database.session import get_db
 from src.database.models import Estacion, Localidad, Provincia
 from src.api.schemas import EstacionSchema, SearchResponse
 
-router = APIRouter(prefix="/search", tags=["Búsqueda"])
+router = APIRouter(prefix="/estaciones", tags=["Estaciones"])
 
 
 @router.get(
     "",
     response_model=SearchResponse,
-    summary="Buscar estaciones ITV",
+    summary="Listar y buscar estaciones ITV",
     description="""
-    Endpoint para buscar estaciones ITV con filtros opcionales.
+    Recurso principal para obtener estaciones ITV con filtros opcionales.
     
     Permite filtrar por:
     - **localidad**: Nombre de la localidad
     - **cod_postal**: Código postal exacto
     - **provincia**: Nombre de la provincia
+    - **tipo**: Tipo de estación (Fija, Movil, Otros)
     
     Si no se especifica ningún filtro, devuelve todas las estaciones.
     """
@@ -123,4 +124,50 @@ async def search_stations(
     return SearchResponse(
         total=len(resultados),
         resultados=resultados
+    )
+
+
+@router.get(
+    "/{cod_estacion}",
+    response_model=EstacionSchema,
+    summary="Obtener una estación por su código",
+    description="Devuelve los datos completos de una estación ITV identificada por su código único."
+)
+async def get_station(
+    cod_estacion: int,
+    db: Session = Depends(get_db)
+) -> EstacionSchema:
+    estacion = db.query(Estacion).filter(Estacion.cod_estacion == cod_estacion).first()
+
+    if not estacion:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No se encontró la estación con código {cod_estacion}"
+        )
+
+    tipo_value = estacion.tipo.value if hasattr(estacion.tipo, 'value') else str(estacion.tipo)
+
+    localidad_nombre = None
+    provincia_nombre = None
+    if estacion.localidad:
+        localidad_nombre = estacion.localidad.nombre
+        if estacion.localidad.provincia:
+            provincia_nombre = estacion.localidad.provincia.nombre
+
+    return EstacionSchema(
+        cod_estacion=estacion.cod_estacion,
+        nombre=estacion.nombre,
+        tipo=tipo_value,
+        direccion=estacion.direccion,
+        codigo_postal=estacion.codigo_postal,
+        latitud=estacion.latitud,
+        longitud=estacion.longitud,
+        descripcion=estacion.descripcion,
+        horario=estacion.horario,
+        contacto=estacion.contacto,
+        url=estacion.url,
+        codigo_localidad=estacion.codigo_localidad,
+        origen_datos=estacion.origen_datos,
+        localidad_nombre=localidad_nombre,
+        provincia_nombre=provincia_nombre
     )

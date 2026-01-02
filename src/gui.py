@@ -1,13 +1,11 @@
 # src/gui.py
-"""
-ITV Station Search GUI with ttkbootstrap and OpenStreetMap integration.
-"""
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
-import tkintermapview
-import requests
-from typing import Optional
+"""ITV Station Search GUI with ttkbootstrap and OpenStreetMap integration."""
 import threading
+
+import requests
+import ttkbootstrap as ttk
+import tkintermapview
+from ttkbootstrap.constants import *
 
 
 class ITVSearchApp:
@@ -26,7 +24,9 @@ class ITVSearchApp:
     
     # API base URL
     API_BASE_URL = "http://localhost:8000"
-    
+    # Tile source URL (plain OSM)
+    TILE_SERVER_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+
     def __init__(self):
         """Initialize the application."""
         self.root = ttk.Window(
@@ -36,7 +36,7 @@ class ITVSearchApp:
             minsize=(1200, 700)
         )
         self.root.position_center()
-        
+
         # Store current markers for cleanup
         self.markers = []
         
@@ -252,6 +252,7 @@ class ITVSearchApp:
             map_frame,
             corner_radius=10
         )
+        self.map_widget.set_tile_server(self.TILE_SERVER_URL, max_zoom=18)
         self.map_widget.pack(fill=BOTH, expand=True)
         
         # Map controls
@@ -271,6 +272,7 @@ class ITVSearchApp:
             command=self._fit_to_results,
             bootstyle="info-outline"
         ).pack(side=LEFT, padx=(10, 0))
+
         
     def _create_results_section(self):
         """Create the results section with table."""
@@ -347,7 +349,7 @@ class ITVSearchApp:
         """Fetch all stations from API."""
         try:
             response = requests.get(
-                f"{self.API_BASE_URL}/search",
+                f"{self.API_BASE_URL}/estaciones",
                 timeout=15
             )
             
@@ -426,15 +428,14 @@ class ITVSearchApp:
         """Make API request for search."""
         try:
             response = requests.get(
-                f"{self.API_BASE_URL}/search",
+                f"{self.API_BASE_URL}/estaciones",
                 params=params,
                 timeout=10
             )
             
             if response.status_code == 200:
                 data = response.json()
-                has_filters = any(params.values())
-                self.root.after(0, lambda: self._display_results(data, fit_to_results=has_filters))
+                self.root.after(0, lambda: self._display_results(data))
             elif response.status_code == 404:
                 self.root.after(0, lambda: self._display_no_results())
                 
@@ -491,7 +492,7 @@ class ITVSearchApp:
                 )
                 self.markers.append(marker)
         
-        # Fit map to show all markers if filtered search
+        # Fit map to show all markers only if explicitly requested
         if fit_to_results and self.markers:
             self._fit_to_results()
         

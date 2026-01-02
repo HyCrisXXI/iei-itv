@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
-from src.wrappers.wrapper_gal import csvtojson
-from src.wrappers.wrapper_cat import xmltojson
-from src.wrappers.wrapper_cv import jsontojson
 from src.api.routes.search import router as search_router
+from src.api.wrappers.api_cat import router as wrapper_cat_router
+from src.api.wrappers.api_cv import router as wrapper_cv_router
+from src.api.wrappers.api_gal import router as wrapper_gal_router
 
 app = FastAPI(
     title="IEI ITV API",
@@ -11,25 +11,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Incluye el router de búsqueda
+# Incluye los routers disponibles
 app.include_router(search_router)
+app.include_router(wrapper_cat_router)
+app.include_router(wrapper_cv_router)
+app.include_router(wrapper_gal_router)
 
 @app.get("/", include_in_schema=False)
 async def redirect_to_docs():
     return RedirectResponse(url="/docs")
 
-# Endpoints para obtener datos de las estaciones
-@app.get("/gal")
-def get_gal():
-    """Devuelve los datos de Galicia en formato JSON."""
-    return csvtojson()
-
-@app.get("/cat")
-def get_cat():
-    """Devuelve los datos de Cataluña en formato JSON."""
-    return xmltojson()
-
-@app.get("/cv")
-def get_cv():
-    """Devuelve los datos de Comunidad Valenciana en formato JSON."""
-    return jsontojson()
+# Los datos regionales se exponen a través de los routers de wrappers

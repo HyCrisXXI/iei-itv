@@ -6,8 +6,17 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from common.db_storage import save_stations
 
+API_BASE_URL = "http://127.0.0.1:8000"
+WRAPPER_ENDPOINTS = {
+    "gal": "/wrappers/gal/estaciones",
+    "cat": "/wrappers/cat/estaciones",
+    "cv": "/wrappers/cv/estaciones"
+}
+
 def get_api_data(source_tag: str) -> dict:
-    url = "http://127.0.0.1:8000/" + source_tag
+    endpoint = WRAPPER_ENDPOINTS.get(source_tag)
+
+    url = f"{API_BASE_URL}{endpoint}"
     try:
         # Recupera datos de la API
         response = requests.get(url, timeout=5)
