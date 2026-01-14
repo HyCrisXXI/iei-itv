@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
-from src.gui import ITVSearchApp
+from src.busqueda_gui import ITVSearchApp
 from src.carga_gui import CargaApp
 
 # Funciones de los botones
