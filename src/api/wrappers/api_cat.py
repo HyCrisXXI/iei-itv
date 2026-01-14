@@ -14,7 +14,7 @@ router = APIRouter(
 @router.get(
     "/estaciones",
     summary="Obtener estaciones de la fuente Cataluña",
-    description="Transforma el XML oficial en una representación JSON lista para el backend.",
+    description="Convierte el XML en un JSON unificado.",
     response_model=List[Dict[str, Any]]
 )
 def get_cat_stations() -> List[Dict[str, Any]]:

@@ -14,7 +14,7 @@ router = APIRouter(
 @router.get(
     "/estaciones",
     summary="Obtener estaciones de la fuente Galicia",
-    description="Convierte el CSV suministrado por la Xunta en una carga JSON unificada.",
+    description="Convierte el CSV en un JSON unificado.",
     response_model=List[Dict[str, Any]]
 )
 def get_gal_stations() -> List[Dict[str, Any]]:

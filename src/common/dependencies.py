@@ -8,18 +8,16 @@ from common.db_storage import save_stations
 
 API_BASE_URL = "http://127.0.0.1:8000"
 WRAPPER_ENDPOINTS = {
-    "gal": "/wrappers/gal/estaciones",
-    "cat": "/wrappers/cat/estaciones",
-    "cv": "/wrappers/cv/estaciones"
+    "cat": "http://127.0.0.1:8001/wrappers/cat/estaciones",
+    "cv": "http://127.0.0.1:8002/wrappers/cv/estaciones",
+    "gal": "http://127.0.0.1:8003/wrappers/gal/estaciones"
 }
 
 def get_api_data(source_tag: str) -> dict:
     endpoint = WRAPPER_ENDPOINTS.get(source_tag)
-
-    url = f"{API_BASE_URL}{endpoint}"
     try:
         # Recupera datos de la API
-        response = requests.get(url, timeout=5)
+        response = requests.get(endpoint, timeout=5)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:

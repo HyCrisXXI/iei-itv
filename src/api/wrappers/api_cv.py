@@ -14,7 +14,7 @@ router = APIRouter(
 @router.get(
     "/estaciones",
     summary="Obtener estaciones de la fuente Comunitat Valenciana",
-    description="Publica el JSON autonómico sin transformar para alimentar el sistema.",
+    description="Recupera el archivo JSON original.",
     response_model=List[Dict[str, Any]]
 )
 def get_cv_stations() -> List[Dict[str, Any]]:
