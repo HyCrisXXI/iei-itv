@@ -1,6 +1,8 @@
 # src/extractors/extractor_cv.py
 import unicodedata
 import sys
+import re
+import time
 from difflib import get_close_matches
 from selenium import webdriver
 from pathlib import Path
@@ -61,6 +63,22 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
     correo = record.get("CORREO")
     url = extract_domain_from_email(correo)
     horario = record.get("HORARIOS")
+    
+    # Validación robusta de horario con Regex
+    if horario:
+        # Busca patrones H:MM o HH:MM
+        times = re.findall(r'(\d{1,2}):(\d{2})', horario)
+        for h_str, m_str in times:
+            try:
+                h = int(h_str)
+                m = int(m_str)
+                if not (0 <= h <= 23 and 0 <= m <= 59):
+                    # Fuera de rango
+                    print(f"   [!] Horario inválido detectado: {h}:{m} en '{horario}'")
+                    return None
+            except ValueError:
+                return None
+
     contacto = record.get("CORREO")
     
     # Campos comunes para fijas y no fijas

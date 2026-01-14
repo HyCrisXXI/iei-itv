@@ -63,34 +63,42 @@ def save_stations(stations_data: list[dict], source_tag: str) -> dict:
             # --- PROVINCIA ---
             prov = None
             if p_nombre:
-                if p_nombre in prov_cache:
-                    prov = prov_cache[p_nombre]
+                p_norm = p_nombre.strip().lower() # Normalización para cache
+                if p_norm in prov_cache:
+                    prov = prov_cache[p_norm]
                 else:
                     # Intentar buscar
                     query = session.query(Provincia)
                     if p_cod:
                         prov = query.filter_by(codigo=p_cod).first()
                     if not prov:
-                        prov = query.filter_by(nombre=p_nombre).first()
+                        prov = query.filter(Provincia.nombre.ilike(p_nombre)).first()
                     
                     if not prov:
                         # Crear
-                        prov = Provincia(nombre=p_nombre, codigo=p_cod)
+                        prov_final_name = p_nombre.strip().capitalize()
+                        prov = Provincia(nombre=prov_final_name, codigo=p_cod)
                         session.add(prov)
                         session.flush()
                     
-                    prov_cache[p_nombre] = prov
+                    prov_cache[p_norm] = prov
 
             # --- LOCALIDAD ---
             loc = None
             if l_nombre and prov:
-                loc_key = (l_nombre, prov.codigo)
+                l_norm = l_nombre.strip().lower()
+                loc_key = (l_norm, prov.codigo)
                 if loc_key in loc_cache:
                     loc = loc_cache[loc_key]
                 else:
-                    loc = session.query(Localidad).filter_by(nombre=l_nombre, codigo_provincia=prov.codigo).first()
+                    loc = session.query(Localidad).filter(
+                        Localidad.nombre.ilike(l_nombre), 
+                        Localidad.codigo_provincia == prov.codigo
+                    ).first()
+                    
                     if not loc:
-                        loc = Localidad(nombre=l_nombre, codigo_provincia=prov.codigo)
+                        loc_final_name = l_nombre.strip().capitalize() # Normalización simple
+                        loc = Localidad(nombre=loc_final_name, codigo_provincia=prov.codigo)
                         session.add(loc)
                         session.flush()
                     loc_cache[loc_key] = loc
