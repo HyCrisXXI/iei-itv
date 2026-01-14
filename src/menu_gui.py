@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 from src.busqueda_gui import ITVSearchApp
-from src.carga_gui import CargaApp
+from src.carga_gui import ITVCargaApp
 
 # Funciones de los botones
 def abrir_buscador():
@@ -10,7 +10,7 @@ def abrir_buscador():
 
 def abrir_carga():
     root.destroy()
-    CargaApp().run()
+    ITVCargaApp().run()
 
 root = tk.Tk()
 root.title("Menú principal")
