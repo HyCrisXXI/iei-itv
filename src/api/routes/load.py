@@ -8,6 +8,8 @@ from src.api.schemas import EstacionSchema, SearchResponse
 
 router = APIRouter(prefix="/load", tags=["Carga de Estaciones"])
 
+# Comunidades con pipelines implementados en el sistema
+# Nota: el valor coincide con el campo "origen_datos" almacenado en la BD
 VALID_SOURCES = {"gal", "cv", "cat"}
 
 
@@ -32,6 +34,7 @@ async def get_stations_by_source(
 			detail="La comunidad seleccionada no es válida. Valores permitidos: gal, cv, cat",
 		)
 
+	# Consulta todas las estaciones cuyo origen coincide con la comunidad seleccionada
 	estaciones = db.query(Estacion).filter(Estacion.origen_datos == fuente_normalizada).all()
 
 	if not estaciones:
@@ -42,14 +45,17 @@ async def get_stations_by_source(
 
 	resultados = []
 	for estacion in estaciones:
+		# ChoiceType puede exponer Enum o string según el backend, de ahí la comprobación
 		tipo_value = estacion.tipo.value if hasattr(estacion.tipo, "value") else str(estacion.tipo)
 
 		localidad_nombre = None
 		provincia_nombre = None
 
 		if estacion.localidad:
+			# Traemos el nombre de la localidad para enriquecer la respuesta
 			localidad_nombre = estacion.localidad.nombre
 			if estacion.localidad.provincia:
+				# Igual para la provincia, si existe relación cargada
 				provincia_nombre = estacion.localidad.provincia.nombre
 
 		resultados.append(
@@ -81,8 +87,11 @@ async def get_stations_by_source(
 	description="Elimina estaciones, localidades y provincias almacenadas en la base de datos.",
 )
 async def delete_storage(db: Session = Depends(get_db)) -> dict:
+	# Se elimina siguiendo la jerarquía para evitar claves foráneas huérfanas
 	estaciones_eliminadas = db.query(Estacion).delete(synchronize_session=False)
+	# Localidades dependen de provincias, por eso se borran en segundo lugar
 	localidades_eliminadas = db.query(Localidad).delete(synchronize_session=False)
+	# Por último provincias; si no hubiera localidades relacionadas, la operación es segura
 	provincias_eliminadas = db.query(Provincia).delete(synchronize_session=False)
 	db.commit()
 
