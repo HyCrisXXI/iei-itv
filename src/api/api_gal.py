@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
-from src.api.wrappers.api_gal import router as wrapper_gal_router
+from src.api.wrappers.gal import router as wrapper_gal_router
 
 app = FastAPI(
     title="IEI ITV API",

@@ -101,23 +101,37 @@ def geolocate_google_selenium(driver, direccion: str, municipio: str):
         
         # 2. Buscar
         try:
-            search_box = wait_largo.until(EC.element_to_be_clickable((By.ID, "searchboxinput")))
+            search_box = wait_corto.until(EC.element_to_be_clickable((By.ID, "searchboxinput")))
         except:
             search_box = wait_largo.until(EC.element_to_be_clickable((By.NAME, "q")))
 
         search_box.clear()
         search_box.send_keys(busqueda)
         
+        # Capturamos coordenadas previas para detectar cambio real de mapa
+        prev_lat, prev_lon = get_coords_from_google_url(driver.current_url)
         previous_url = driver.current_url
         search_box.send_keys(Keys.ENTER)
 
-        # 3. Esperar confirmación de búsqueda
+        # 3. Esperar confirmación de búsqueda (Cambio REAL de coordenadas)
+        # La URL cambia rápido (query string), pero las coordenadas (@...) tardan más.
+        # Esperamos explícitamente a que las coordenadas sean distintas a las anteriores.
+        def coords_have_changed(driver):
+            new_lat, new_lon = get_coords_from_google_url(driver.current_url)
+            # Si no hay coords nuevas (quizás cargando), seguimos esperando
+            if new_lat is None or new_lon is None:
+                return False
+            # Si no había coords previas (pantalla inicio), cualquier coord nueva vale
+            if prev_lat is None or prev_lon is None:
+                return True
+            # Comparamos con margen (epsilon) para detectar movimiento
+            return abs(new_lat - prev_lat) > 0.0001 or abs(new_lon - prev_lon) > 0.0001
+
         try:
-            wait_corto.until(EC.url_changes(previous_url))
+            wait_largo.until(coords_have_changed)
         except:
-             # Si no cambia rápido, asumimos que ya cargó o no va a cambiar
              pass
-                
+        
         current_url = driver.current_url
 
         # Si estamos en una lista de resultados (/search/), intentamos clicar el primero
