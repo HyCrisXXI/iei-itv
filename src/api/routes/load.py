@@ -52,10 +52,10 @@ async def get_stations_by_source(
 		provincia_nombre = None
 
 		if estacion.localidad:
-			# Traemos el nombre de la localidad para enriquecer la respuesta
+			# Traemos el nombre de la localidad
 			localidad_nombre = estacion.localidad.nombre
 			if estacion.localidad.provincia:
-				# Igual para la provincia, si existe relación cargada
+				# Igual para la provincia
 				provincia_nombre = estacion.localidad.provincia.nombre
 
 		resultados.append(
