@@ -11,9 +11,22 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from extractors.selenium_cv import geolocate_google_selenium
 from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
 from common.errors import error_msg
+from common.validators import (
+    is_valid_horario, 
+    is_valid_email, 
+    choose_best_value,
+    merge_duplicate_records
+)
 
 #Normaliza provincias automáticamente corrigiendo errores
 PROVINCIAS_VALIDAS = ["valencia","alicante","castellon"]
+
+
+# Definir validadores específicos para CV
+CV_FIELD_VALIDATORS = {
+    "HORARIOS": is_valid_horario,
+    "CORREO": is_valid_email,
+}
 
 
 def normalizar_provincia(nombre: str | None) -> str | None:
@@ -150,6 +163,11 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
 
 
 def transform_cv_data(data_list: list) -> list:
+    # Paso 1: Fusionar registros duplicados antes de transformar
+    print(f"   [*] Registros originales: {len(data_list)}")
+    merged_data = merge_duplicate_records(data_list, "Nº ESTACIÓN", CV_FIELD_VALIDATORS)
+    print(f"   [*] Registros tras fusión: {len(merged_data)}")
+    
     options = webdriver.ChromeOptions()
     options.add_argument("--start-maximized")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -158,7 +176,7 @@ def transform_cv_data(data_list: list) -> list:
         transformed_data = []
         stats_trans = {"total": 0, "valid": 0, "invalid": 0}
         
-        for record in data_list:
+        for record in merged_data:
             stats_trans["total"] += 1
             res = transform_cv_record(record, driver=driver)
             if res:

@@ -8,6 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
 from common.errors import error_msg
+from common.validators import clean_invalid_email
 
 provinciaCat = ["Tarragona", "Lleida", "Girona", "Barcelona"]
 
@@ -124,6 +125,11 @@ def transform_cat_record(record: dict) -> dict:
 
     transformed["tipo"] = "fija"
 
+    # Limpiar emails inválidos (ej: "itv@" sin dominio) a None
+    contacto = transformed.get("contacto")
+    transformed["contacto"] = clean_invalid_email(contacto)
+    
+    # Si no hay contacto válido, usar URL como fallback
     if not transformed.get("contacto"):
         transformed["contacto"] = transformed.get("url")
 

@@ -6,6 +6,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from common.errors import error_msg, check_postal_code, check_coords
 from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
+from common.validators import clean_invalid_email
 
 
 DD_REGEX = re.compile(r"^[+-]?\d+(\.\d+)?$")
@@ -99,8 +100,11 @@ def transform_gal_record(record: dict) -> dict:
     if not check_postal_code(e_nombre, cod_postal):
         return None
         
+    # Limpiar emails inválidos (ej: "itv@" sin dominio) a None
     contacto = transformed.get("contacto", "")
-    if not contacto:
+    transformed["contacto"] = clean_invalid_email(contacto)
+    
+    if not transformed.get("contacto"):
         error_msg(e_nombre, ["contacto"])
 
     # Verificar otros campos requeridos para notificar si faltan
