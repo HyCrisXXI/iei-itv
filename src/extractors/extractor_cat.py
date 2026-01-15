@@ -7,12 +7,14 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
-from common.errors import error_msg
+from common.errors import error_msg, register_rejection, register_repair
 from common.validators import clean_invalid_email
 
 provinciaCat = ["Tarragona", "Lleida", "Girona", "Barcelona"]
 
 cpCat = ["43", "25", "17", "08"]
+
+SOURCE_TAG = "cat"
 
 mappingProvincia = {
     "08": "Barcelona",
@@ -146,10 +148,19 @@ def transform_cat_record(record: dict) -> dict:
     # --- Validaciones unificadas ---
     est_name = transformed.get("nombre")
     p_code = transformed.get("p_cod")
+    localidad_nombre = transformed.get("l_nombre")
+
+    def _register_fix(motivo: str, operacion: str) -> None:
+        register_repair(SOURCE_TAG, est_name, localidad_nombre, motivo, operacion)
+
+    def _register_reject(motivo: str) -> None:
+        register_rejection(SOURCE_TAG, est_name, localidad_nombre, motivo)
     
     # 1. Validar Código Postal en Cataluña
     if p_code not in cpCat:
-        error_msg(est_name or "Desconocida", [f"codigo_postal ({p_code}) fuera de rango CAT"])
+        motivo = f"Código postal ({p_code}) fuera de rango CAT"
+        error_msg(est_name or "Desconocida", [motivo])
+        _register_reject(motivo)
         return None 
 
     # 2. Comprobar coincidencia entre Provincia y Código Postal
@@ -158,8 +169,14 @@ def transform_cat_record(record: dict) -> dict:
     if mappingProvincia.get(p_code) != nom_prov:
         if p_code in cpCat:
             transformed["p_nombre"] = mappingProvincia[p_code]
+            _register_fix(
+                "La provincia no coincidía con el código postal",
+                f"Provincia ajustada a {mappingProvincia[p_code]}",
+            )
         else:
-            error_msg(est_name or "Desconocida", [f"Provincia ({nom_prov}) no coincide con código postal ({p_code})"])
+            motivo = f"Provincia ({nom_prov}) no coincide con código postal ({p_code})"
+            error_msg(est_name or "Desconocida", [motivo])
+            _register_reject(motivo)
             return None
 
     # 3. Validar Nombre Provincia
@@ -168,12 +185,19 @@ def transform_cat_record(record: dict) -> dict:
         if p_code in cpCat:
             prov_name = mappingProvincia[p_code]
             transformed["p_nombre"] = prov_name
+            _register_fix(
+                "Provincia no válida",
+                f"Provincia reasignada a {prov_name}",
+            )
         else:
             error_msg(est_name or "Desconocida", ["p_nombre"])
+            _register_reject("Provincia no reconocida")
             return None
             
     if not prov_name:
-        error_msg(est_name or "Desconocida", ["Provincia no identificada"])
+        motivo = "Provincia no identificada"
+        error_msg(est_name or "Desconocida", [motivo])
+        _register_reject(motivo)
         return None
 
     # Ajuste final de claves para la función de guardado común

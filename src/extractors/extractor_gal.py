@@ -4,10 +4,17 @@ import re
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from common.errors import error_msg, check_postal_code, check_coords
+from common.errors import (
+    error_msg,
+    check_postal_code,
+    check_coords,
+    register_rejection,
+    register_repair,
+)
 from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
 from common.validators import clean_invalid_email
 
+SOURCE_TAG = "gal"
 
 DD_REGEX = re.compile(r"^[+-]?\d+(\.\d+)?$")
 
@@ -61,6 +68,7 @@ def transform_gal_record(record: dict) -> dict:
         "COORDENADAS GMAPS": "coordenadas", # Clave temporal para procesar coords
         "HORARIO": "horario",
         "CORREO ELECTRÓNICO": "contacto",
+        "TELÉFONO": "telefono",
         "SOLICITUDE DE CITA PREVIA": "url",
         "CONCELLO": "l_nombre",
         "PROVINCIA": "p_nombre"
@@ -83,11 +91,24 @@ def transform_gal_record(record: dict) -> dict:
             lat = ddm_to_dd_or_pass(parts[0]) # Función de conversión DDM/DD
             lon = ddm_to_dd_or_pass(parts[1])
             
-            if not check_coords(e_nombre, lat, lon): return None
+            if not check_coords(
+                e_nombre,
+                lat,
+                lon,
+                source=SOURCE_TAG,
+                localidad=transformed.get("l_nombre"),
+            ):
+                return None
             
             transformed["latitud"] = lat # Clave nueva con datos transformados
             transformed["longitud"] = lon
         else:
+            register_rejection(
+                SOURCE_TAG,
+                e_nombre,
+                transformed.get("l_nombre"),
+                "Coordenadas con formato no reconocible",
+            )
             return None
 
     cod_postal = str(transformed.get("codigo_postal", None))
@@ -97,15 +118,27 @@ def transform_gal_record(record: dict) -> dict:
         error_msg(e_nombre, ["codigo_postal"])
         transformed["p_cod"] = None
         
-    if not check_postal_code(e_nombre, cod_postal):
+    if not check_postal_code(
+        e_nombre,
+        cod_postal,
+        source=SOURCE_TAG,
+        localidad=transformed.get("l_nombre"),
+    ):
         return None
         
-    # Limpiar emails inválidos (ej: "itv@" sin dominio) a None
-    contacto = transformed.get("contacto", "")
-    transformed["contacto"] = clean_invalid_email(contacto)
-    
     if not transformed.get("contacto"):
-        error_msg(e_nombre, ["contacto"])
+        telefono = transformed.get("telefono", "")
+        if telefono:
+            transformed["contacto"] = telefono
+            register_repair(
+                SOURCE_TAG,
+                e_nombre,
+                transformed.get("l_nombre"),
+                "Campo de contacto vacío",
+                "Sustituido por número de teléfono",
+            )
+        else:
+            error_msg(e_nombre, ["contacto"])
 
     # Verificar otros campos requeridos para notificar si faltan
     required_fields = [

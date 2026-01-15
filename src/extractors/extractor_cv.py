@@ -10,7 +10,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from extractors.selenium_cv import geolocate_google_selenium
 from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
-from common.errors import error_msg
+from common.errors import error_msg, register_rejection
 from common.validators import (
     is_valid_horario, 
     is_valid_email, 
@@ -27,6 +27,7 @@ CV_FIELD_VALIDATORS = {
     "HORARIOS": is_valid_horario,
     "CORREO": is_valid_email,
 }
+SOURCE_TAG = "cv"
 
 
 def normalizar_provincia(nombre: str | None) -> str | None:
@@ -78,6 +79,11 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
     horario = record.get("HORARIOS")
     
     # Validación robusta de horario con Regex
+    municipio = record.get("MUNICIPIO")
+    def _reject(reason: str, *, nombre: str | None = None):
+        context_name = nombre or build_station_name(municipio) or record.get("DIRECCIÓN")
+        register_rejection(SOURCE_TAG, context_name, municipio, reason)
+
     if horario:
         # Busca patrones H:MM o HH:MM
         times = re.findall(r'(\d{1,2}):(\d{2})', horario)
@@ -88,8 +94,10 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
                 if not (0 <= h <= 23 and 0 <= m <= 59):
                     # Fuera de rango
                     print(f"   [!] Horario inválido detectado: {h}:{m} en '{horario}'")
+                    _reject(f"Horario inválido: {horario}")
                     return None
             except ValueError:
+                _reject(f"Horario inválido: {horario}")
                 return None
 
     contacto = record.get("CORREO")
@@ -107,13 +115,13 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
     
     # Estaciones fijas: requieren todos los datos (salvo descripción)
     if "fija" in tipo_estacion.lower():
-        municipio = record.get("MUNICIPIO")
         codigo_postal = record.get("C.POSTAL")
         cod_postal_string = str(codigo_postal) if codigo_postal else None
         p_cod = cod_postal_string[:2] if cod_postal_string else None
 
         if not cod_postal_string:
             error_msg(municipio or "Desconocida", ["codigo_postal"])
+            _reject("Código postal obligatorio")
             return None
             
         nombre = build_station_name(municipio)
@@ -121,9 +129,11 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
         # Validación de campos obligatorios para estaciones fijas
         if not provincia:
             error_msg(nombre, ["provincia"])
+            _reject("Provincia no reconocida", nombre=nombre)
             return None
         if not municipio:
             error_msg(nombre, ["municipio"])
+            _reject("Municipio obligatorio", nombre=nombre)
             return None
 
         # Geolocalización mediante Selenium
@@ -131,6 +141,7 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
         # Solo comprobamos latitud, ya que el método devuelve ambas o ninguna
         if not lat:
             error_msg(nombre, ["latitud/longitud"])
+            _reject("No se pudieron obtener coordenadas válidas", nombre=nombre)
             return None
 
         transformed.update({

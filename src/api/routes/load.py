@@ -1,9 +1,28 @@
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from src.database.session import get_db
 from src.database.models import Estacion, Localidad, Provincia
-from src.api.schemas import EstacionSchema, SearchResponse
+from src.api.schemas import (
+	EstacionSchema,
+	SearchResponse,
+	LoadRequest,
+	LoadProcessResponse,
+	FuenteCargaDetalle,
+	RegistroReparadoSchema,
+	RegistroRechazadoSchema,
+)
+from src.common.db_storage import save_stations
+from src.common.errors import consume_error_logs, reset_error_logs
+from src.wrappers.wrapper_gal import csvtojson
+from src.wrappers.wrapper_cv import jsontojson
+from src.wrappers.wrapper_cat import xmltojson
+from src.extractors.extractor_gal import transform_gal_data
+from src.extractors.extractor_cv import transform_cv_data
+from src.extractors.extractor_cat import transform_cat_data
 
 
 router = APIRouter(prefix="/load", tags=["Carga de Estaciones"])
@@ -11,6 +30,18 @@ router = APIRouter(prefix="/load", tags=["Carga de Estaciones"])
 # Comunidades con pipelines implementados en el sistema
 # Nota: el valor coincide con el campo "origen_datos" almacenado en la BD
 VALID_SOURCES = {"gal", "cv", "cat"}
+
+RAW_FETCHERS = {
+	"gal": csvtojson,
+	"cv": jsontojson,
+	"cat": xmltojson,
+}
+
+TRANSFORMERS = {
+	"gal": transform_gal_data,
+	"cv": transform_cv_data,
+	"cat": transform_cat_data,
+}
 
 
 @router.get(
@@ -103,3 +134,105 @@ async def delete_storage(db: Session = Depends(get_db)) -> dict:
 			"provincias": provincias_eliminadas,
 		},
 	}
+
+
+@router.post(
+	"/run",
+	response_model=LoadProcessResponse,
+	summary="Ejecutar pipelines de carga",
+	description=(
+		"Obtiene, transforma y guarda los datos de las comunidades seleccionadas, "
+		"retornando un resumen de la operación."
+	),
+)
+async def run_load_pipelines(payload: LoadRequest) -> LoadProcessResponse:
+	seen: set[str] = set()
+	fuentes_normalizadas: List[str] = []
+	for fuente in payload.fuentes:
+		if not fuente:
+			continue
+		key = fuente.strip().lower()
+		if not key or key in seen:
+			continue
+		seen.add(key)
+		fuentes_normalizadas.append(key)
+
+	if not fuentes_normalizadas:
+		raise HTTPException(status_code=400, detail="No se proporcionaron comunidades válidas para cargar")
+
+	invalid = [src for src in fuentes_normalizadas if src not in VALID_SOURCES]
+	if invalid:
+		raise HTTPException(
+			status_code=400,
+			detail=f"Las siguientes comunidades no son válidas: {', '.join(invalid)}",
+		)
+
+	result = await run_in_threadpool(_process_sources_pipeline, fuentes_normalizadas)
+	return LoadProcessResponse(**result)
+
+
+def _process_sources_pipeline(fuentes: List[str]) -> dict:
+	detalles: List[FuenteCargaDetalle] = []
+	total_insertados = 0
+	total_duplicados = 0
+	total_rechazados = 0
+	reparados_global: List[RegistroReparadoSchema] = []
+	rechazados_global: List[RegistroRechazadoSchema] = []
+
+	for fuente in fuentes:
+		detalle = _process_single_source(fuente)
+		detalles.append(detalle)
+		total_insertados += detalle.insertados
+		total_duplicados += detalle.duplicados
+		total_rechazados += detalle.rechazados_transformacion + len(detalle.errores_guardado)
+		reparados_global.extend(detalle.reparados)
+		rechazados_global.extend(detalle.rechazados)
+
+	return {
+		"total_fuentes": len(detalles),
+		"total_insertados": total_insertados,
+		"total_duplicados": total_duplicados,
+		"total_rechazados": total_rechazados,
+		"detalles": detalles,
+		"reparados": reparados_global,
+		"rechazados": rechazados_global,
+	}
+
+
+def _process_single_source(fuente: str) -> FuenteCargaDetalle:
+	try:
+		fetcher = RAW_FETCHERS[fuente]
+		transformer = TRANSFORMERS[fuente]
+		reset_error_logs()
+		raw_records = fetcher()
+		transformed_records = transformer(raw_records)
+		log_data = consume_error_logs()
+		reparados = [RegistroReparadoSchema(**entry) for entry in log_data["reparados"]]
+		rechazados = [RegistroRechazadoSchema(**entry) for entry in log_data["rechazados"]]
+		stats = save_stations(transformed_records, fuente)
+		errores_guardado = [str(err) for err in stats.get("errors", [])]
+
+		return FuenteCargaDetalle(
+			fuente=fuente,
+			registros_origen=len(raw_records),
+			registros_transformados=len(transformed_records),
+			rechazados_transformacion=len(rechazados),
+			insertados=stats.get("inserted", 0),
+			duplicados=stats.get("duplicates", 0),
+			errores_guardado=errores_guardado,
+			reparados=reparados,
+			rechazados=rechazados,
+		)
+	except Exception as exc:  # pylint: disable=broad-except
+		reset_error_logs()
+		return FuenteCargaDetalle(
+			fuente=fuente,
+			registros_origen=0,
+			registros_transformados=0,
+			rechazados_transformacion=0,
+			insertados=0,
+			duplicados=0,
+			errores_guardado=[f"Error procesando la fuente: {exc}"],
+			reparados=[],
+			rechazados=[],
+		)

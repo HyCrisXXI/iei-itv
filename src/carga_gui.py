@@ -1,13 +1,18 @@
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-from tkinter import BooleanVar, Text, DISABLED, NORMAL, END
+from tkinter import BooleanVar, Text, DISABLED, NORMAL, END, messagebox
+import requests
+import threading
+from typing import Dict
 
 class ITVCargaApp(ttk.Frame):
     FUENTES = [
-        ("Galicia", "galicia"),
+        ("Galicia", "gal"),
         ("Comunitat Valenciana", "cv"),
         ("Catalunya", "cat"),
     ]
+
+    LOAD_API_PORT = 8004
 
     def __init__(self, master=None, on_back=None, *args, **kwargs):
         # Si no hay master, crea ventana propia con el mismo tema que el buscador
@@ -107,20 +112,136 @@ class ITVCargaApp(ttk.Frame):
             self.master.destroy()
 
     def _cargar(self):
-        self._set_resultados(
-            "Número de registros cargados correctamente:\n"
-            "Registros con errores y reparados:\n"
-            "Registros con errores y rechazados:\n"
-        )
+        # Validar que se seleccione al menos una fuente
+        seleccionadas = [key for key, var in self.selected_fuentes.items() if var.get()]
+        if not seleccionadas:
+            messagebox.showwarning("Advertencia", "Selecciona al menos una fuente de datos")
+            return
+        
+        # Iniciar carga en hilo separado para no bloquear la GUI
+        self._set_resultados("Cargando datos...\n\nEspera por favor...")
+        threading.Thread(target=self._cargar_datos, args=(seleccionadas,), daemon=True).start()
+    
+    def _cargar_datos(self, fuentes: list):
+        """Realiza la carga de datos invocando únicamente a la API de carga."""
+        try:
+            self._agregar_resultado(f"\n▶ Ejecutando carga para: {', '.join(f.upper() for f in fuentes)}")
+            url = f"http://localhost:{self.LOAD_API_PORT}/load/run"
+            payload = {"fuentes": fuentes}
+            response = requests.post(url, json=payload, timeout=120)
+            response.raise_for_status()
+            data = response.json()
+            self._mostrar_resumen_carga(data)
+        except requests.exceptions.ConnectionError:
+            msg = "✗ Error: No se puede conectar a la API de carga. Asegúrate de que está ejecutándose."
+            self._agregar_resultado(f"\n{msg}")
+            messagebox.showerror("Error", msg)
+        except requests.exceptions.HTTPError as exc:
+            detail = self._extraer_error_response(exc)
+            self._agregar_resultado(f"\n✗ Error en la API de carga: {detail}")
+            messagebox.showerror("Error", f"API de carga: {detail}")
+        except Exception as e:
+            self._agregar_resultado(f"\n✗ Error general: {str(e)}")
+    
+    def _extraer_error_response(self, exc: requests.exceptions.HTTPError) -> str:
+        try:
+            data = exc.response.json()
+            detail = data.get("detail")
+            if isinstance(detail, list):
+                return "; ".join(str(item) for item in detail)
+            if detail:
+                return str(detail)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        return str(exc)
+
+    def _mostrar_resumen_carga(self, data: Dict):
+        total_insertados = data.get("total_insertados", 0)
+        self._agregar_resultado(f"\nNúmero de registros cargados correctamente: {total_insertados}")
+
+        self._agregar_resultado("\nRegistros con errores y reparados:")
+        reparados = data.get("reparados", []) or []
+        if not reparados:
+            self._agregar_resultado("  Ninguno")
+        else:
+            for reparado in reparados:
+                fuente = str(reparado.get("fuente", "-")).upper()
+                nombre = reparado.get("nombre", "Desconocido")
+                localidad = reparado.get("localidad", "Sin localidad")
+                motivo = reparado.get("motivo", "-")
+                operacion = reparado.get("operacion", "-")
+                self._agregar_resultado(
+                    "  {Fuente de datos: %s, Nombre: %s, Localidad: %s, Motivo del error: %s, Operación realizada: %s}" % (
+                        fuente,
+                        nombre,
+                        localidad,
+                        motivo,
+                        operacion,
+                    )
+                )
+
+        self._agregar_resultado("\nRegistros con errores y rechazados:")
+        rechazados = data.get("rechazados", []) or []
+        if not rechazados:
+            self._agregar_resultado("  Ninguno")
+        else:
+            for rechazado in rechazados:
+                fuente = str(rechazado.get("fuente", "-")).upper()
+                nombre = rechazado.get("nombre", "Desconocido")
+                localidad = rechazado.get("localidad", "Sin localidad")
+                motivo = rechazado.get("motivo", "-")
+                self._agregar_resultado(
+                    "  {Fuente de datos: %s, Nombre: %s, Localidad: %s, Motivo del error: %s}" % (
+                        fuente,
+                        nombre,
+                        localidad,
+                        motivo,
+                    )
+                )
 
     def _borrar(self):
-        self._set_resultados("Almacén de datos borrado.")
+        # Confirmación
+        if not messagebox.askyesno("Confirmar", "¿Estás seguro de que deseas borrar todo el almacén de datos?"):
+            return
+        
+        self._set_resultados("Borrando almacén de datos...\nEspera por favor...")
+        threading.Thread(target=self._borrar_datos, daemon=True).start()
+    
+    def _borrar_datos(self):
+        """Borra todo el almacén de datos"""
+        try:
+            response = requests.delete(f"http://localhost:{self.LOAD_API_PORT}/load", timeout=30)
+            response.raise_for_status()
+            resultado = response.json()
+            
+            self._set_resultados(
+                f"✓ Almacén de datos borrado correctamente\n\n"
+                f"Eliminados:\n"
+                f"  - Estaciones: {resultado['eliminados']['estaciones']}\n"
+                f"  - Localidades: {resultado['eliminados']['localidades']}\n"
+                f"  - Provincias: {resultado['eliminados']['provincias']}"
+            )
+            messagebox.showinfo("Éxito", "Almacén de datos borrado correctamente")
+        except requests.exceptions.ConnectionError:
+            self._set_resultados("✗ Error: No se puede conectar a la API de carga.\nAsegúrate de que está ejecutándose.")
+            messagebox.showerror("Error", "No se puede conectar a la API de carga")
+        except Exception as e:
+            self._set_resultados(f"✗ Error al borrar: {str(e)}")
+            messagebox.showerror("Error", f"Error al borrar: {str(e)}")
 
     def _set_resultados(self, text):
         self.resultados.config(state=NORMAL)
         self.resultados.delete(1.0, END)
         self.resultados.insert(END, text)
         self.resultados.config(state=DISABLED)
+    
+    def _agregar_resultado(self, text):
+        """Agrega texto al área de resultados sin limpiar lo anterior"""
+        self.resultados.config(state=NORMAL)
+        self.resultados.insert(END, text + "\n")
+        self.resultados.see(END)  # Scroll automático al final
+        self.resultados.config(state=DISABLED)
+        self.resultados.update()  # Actualizar GUI
 
     def run(self):
         if self._own_window:

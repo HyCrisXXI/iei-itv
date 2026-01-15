@@ -52,3 +52,61 @@ class EstacionSchema(BaseModel):
 class SearchResponse(BaseModel):
     total: int = Field(..., description="Número total de resultados encontrados")
     resultados: List[EstacionSchema] = Field(..., description="Lista de estaciones encontradas")
+
+
+class RegistroReparadoSchema(BaseModel):
+    fuente: str = Field(..., description="Identificador de la comunidad")
+    nombre: str = Field(..., description="Nombre del registro afectado")
+    localidad: Optional[str] = Field(None, description="Localidad asociada")
+    motivo: str = Field(..., description="Motivo del error detectado")
+    operacion: str = Field(..., description="Operación correctiva aplicada")
+
+
+class RegistroRechazadoSchema(BaseModel):
+    fuente: str = Field(..., description="Identificador de la comunidad")
+    nombre: str = Field(..., description="Nombre del registro descartado")
+    localidad: Optional[str] = Field(None, description="Localidad asociada")
+    motivo: str = Field(..., description="Motivo del rechazo")
+
+
+class LoadRequest(BaseModel):
+    fuentes: List[str] = Field(
+        ...,
+        description="Listado de comunidades a cargar (gal, cv, cat)",
+        min_length=1,
+        examples=[["gal", "cv"]],
+    )
+
+
+class FuenteCargaDetalle(BaseModel):
+    fuente: str = Field(..., description="Identificador de la comunidad procesada")
+    registros_origen: int = Field(..., description="Total de registros obtenidos del origen")
+    registros_transformados: int = Field(..., description="Registros válidos tras la transformación")
+    rechazados_transformacion: int = Field(..., description="Registros descartados durante la transformación")
+    insertados: int = Field(..., description="Registros nuevos insertados en base de datos")
+    duplicados: int = Field(..., description="Registros detectados como duplicados")
+    errores_guardado: List[str] = Field(default_factory=list, description="Errores detectados al guardar")
+    reparados: List[RegistroReparadoSchema] = Field(
+        default_factory=list,
+        description="Registros corregidos durante la transformación",
+    )
+    rechazados: List[RegistroRechazadoSchema] = Field(
+        default_factory=list,
+        description="Registros descartados durante la transformación",
+    )
+
+
+class LoadProcessResponse(BaseModel):
+    total_fuentes: int = Field(..., description="Número de comunidades procesadas")
+    total_insertados: int = Field(..., description="Total de registros insertados")
+    total_duplicados: int = Field(..., description="Total de registros duplicados")
+    total_rechazados: int = Field(..., description="Total de registros descartados (transformación + guardado)")
+    detalles: List[FuenteCargaDetalle] = Field(..., description="Detalle por comunidad procesada")
+    reparados: List[RegistroReparadoSchema] = Field(
+        default_factory=list,
+        description="Listado consolidado de registros corregidos",
+    )
+    rechazados: List[RegistroRechazadoSchema] = Field(
+        default_factory=list,
+        description="Listado consolidado de registros descartados",
+    )
