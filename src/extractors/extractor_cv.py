@@ -6,12 +6,15 @@ import time
 from difflib import get_close_matches
 from selenium import webdriver
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from extractors.selenium_cv import geolocate_google_selenium
-from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
-from common.errors import error_msg, register_rejection
-from common.validators import (
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from src.extractors.selenium_cv import geolocate_google_selenium
+from src.common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
+from src.common.errors import error_msg, register_rejection, register_repair, check_postal_code
+from src.common.validators import (
     is_valid_horario, 
     is_valid_email, 
     choose_best_value,
@@ -119,12 +122,20 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
         cod_postal_string = str(codigo_postal) if codigo_postal else None
         p_cod = cod_postal_string[:2] if cod_postal_string else None
 
-        if not cod_postal_string:
-            error_msg(municipio or "Desconocida", ["codigo_postal"])
-            _reject("Código postal obligatorio")
-            return None
-            
         nombre = build_station_name(municipio)
+
+        if not cod_postal_string:
+            error_msg(nombre or municipio or "Desconocida", ["codigo_postal"])
+            _reject("Código postal obligatorio", nombre=nombre)
+            return None
+
+        if not check_postal_code(
+            nombre or municipio or "Desconocida",
+            cod_postal_string,
+            source=SOURCE_TAG,
+            localidad=municipio,
+        ):
+            return None
 
         # Validación de campos obligatorios para estaciones fijas
         if not provincia:
@@ -156,6 +167,16 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
         })
     else:
         # Estaciones no fijas (móviles o de otro tipo)
+        codigo_postal = record.get("C.POSTAL")
+        if codigo_postal:
+            cod_postal_string = str(codigo_postal)
+            if not check_postal_code(
+                direccion or "Desconocida",
+                cod_postal_string,
+                source=SOURCE_TAG,
+                localidad=municipio,
+            ):
+                return None
         transformed.update({
             "nombre": direccion,
             "direccion": provincia, 
@@ -176,7 +197,38 @@ def transform_cv_record(record: dict, driver=None) -> dict | None:
 def transform_cv_data(data_list: list) -> list:
     # Paso 1: Fusionar registros duplicados antes de transformar
     print(f"   [*] Registros originales: {len(data_list)}")
-    merged_data = merge_duplicate_records(data_list, "Nº ESTACIÓN", CV_FIELD_VALIDATORS)
+
+    def _log_duplicate_merge(key: str, records: list[dict]) -> None:
+        if not key or key.startswith("_unnamed"):
+            return
+        municipios = []
+        for record in records:
+            municipio = record.get("MUNICIPIO")
+            if isinstance(municipio, str):
+                normalized = municipio.strip()
+                if normalized:
+                    municipios.append(normalized)
+        if len(municipios) < 2:
+            return
+        unique_display = set(municipios)
+        unique_normalized = {m.lower() for m in municipios}
+        if len(unique_display) > 1 and len(unique_normalized) == 1:
+            municipio_final = municipios[0]
+            nombre = build_station_name(municipio_final)
+            register_repair(
+                SOURCE_TAG,
+                nombre or f"Estación {key}",
+                municipio_final,
+                "Municipio duplicado con distinta capitalización",
+                "Municipio normalizado durante la fusión de duplicados",
+            )
+
+    merged_data = merge_duplicate_records(
+        data_list,
+        "Nº ESTACIÓN",
+        CV_FIELD_VALIDATORS,
+        on_merge=_log_duplicate_merge,
+    )
     print(f"   [*] Registros tras fusión: {len(merged_data)}")
     
     options = webdriver.ChromeOptions()

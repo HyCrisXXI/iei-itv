@@ -2,17 +2,20 @@
 import sys
 import re
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from common.errors import (
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from src.common.errors import (
     error_msg,
     check_postal_code,
     check_coords,
     register_rejection,
     register_repair,
 )
-from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
-from common.validators import clean_invalid_email
+from src.common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
+from src.common.validators import clean_invalid_email
 
 SOURCE_TAG = "gal"
 
@@ -157,9 +160,23 @@ def transform_gal_record(record: dict) -> dict:
 def transform_gal_data(data_list: list[dict]) -> list[dict]:
     transformed_data = []
     stats_trans = {"total": 0, "valid": 0, "invalid": 0}
+    seen_keys: set[str] = set()
 
     for record in data_list:
         stats_trans["total"] += 1
+        key_nombre = str(record.get("NOME DA ESTACIÓN", "")).strip().lower()
+        if key_nombre and key_nombre in seen_keys:
+            register_repair(
+                SOURCE_TAG,
+                record.get("NOME DA ESTACIÓN"),
+                record.get("CONCELLO"),
+                "Registro duplicado detectado",
+                "Omitido por duplicado en origen",
+            )
+            stats_trans["invalid"] += 1
+            continue
+        if key_nombre:
+            seen_keys.add(key_nombre)
         res = transform_gal_record(record)
         if res:
             transformed_data.append(res)

@@ -4,11 +4,14 @@ import sys
 import xml.etree.ElementTree as ET
 
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
-from common.errors import error_msg, register_rejection, register_repair
-from common.validators import clean_invalid_email
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from src.common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
+from src.common.errors import error_msg, register_rejection, register_repair
+from src.common.validators import clean_invalid_email
 
 provinciaCat = ["Tarragona", "Lleida", "Girona", "Barcelona"]
 
@@ -22,6 +25,8 @@ mappingProvincia = {
     "25": "Lleida",
     "43": "Tarragona",
 }
+
+PROVINCIA_TO_CODE = {name.lower(): code for code, name in mappingProvincia.items()}
 
 POINT_RE = re.compile(r"POINT\s*\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*\)", re.IGNORECASE)
 
@@ -149,6 +154,8 @@ def transform_cat_record(record: dict) -> dict:
     est_name = transformed.get("nombre")
     p_code = transformed.get("p_cod")
     localidad_nombre = transformed.get("l_nombre")
+    nom_prov = transformed.get("p_nombre")
+    nom_prov_clean = nom_prov.strip() if isinstance(nom_prov, str) else None
 
     def _register_fix(motivo: str, operacion: str) -> None:
         register_repair(SOURCE_TAG, est_name, localidad_nombre, motivo, operacion)
@@ -158,14 +165,24 @@ def transform_cat_record(record: dict) -> dict:
     
     # 1. Validar Código Postal en Cataluña
     if p_code not in cpCat:
-        motivo = f"Código postal ({p_code}) fuera de rango CAT"
-        error_msg(est_name or "Desconocida", [motivo])
-        _register_reject(motivo)
-        return None 
+        inferred_code = None
+        if nom_prov_clean:
+            inferred_code = PROVINCIA_TO_CODE.get(nom_prov_clean.lower())
+
+        if inferred_code:
+            transformed["p_cod"] = inferred_code
+            p_code = inferred_code
+            _register_fix(
+                "Código postal ausente o inválido",
+                f"Código ajustado a {inferred_code} usando provincia {nom_prov_clean}",
+            )
+        else:
+            motivo = f"Código postal ({p_code}) fuera de rango CAT"
+            error_msg(est_name or "Desconocida", [motivo])
+            _register_reject(motivo)
+            return None 
 
     # 2. Comprobar coincidencia entre Provincia y Código Postal
-    nom_prov = transformed.get("p_nombre")
-    
     if mappingProvincia.get(p_code) != nom_prov:
         if p_code in cpCat:
             transformed["p_nombre"] = mappingProvincia[p_code]
@@ -218,16 +235,80 @@ def transform_cat_record(record: dict) -> dict:
 def transform_cat_data(data_list: list) -> list:
     transformed_data = []
     stats_trans = {"total": 0, "valid": 0, "invalid": 0}
+    seen_records: dict[str, dict] = {}
+    deduped_records: list[dict] = []
+
+    def _normalize_name(value: str | None) -> str:
+        return str(value).strip().lower() if value else ""
+
+    def _has_postal(record: dict) -> bool:
+        cp_value = _extract_value(record.get("cp"))
+        if cp_value is None:
+            return False
+        return bool(str(cp_value).strip())
+
+    def _richness_score(record: dict) -> int:
+        fields = [
+            "adre_a",
+            "horari_de_servei",
+            "correu_electr_nic",
+            "web",
+            "lat",
+            "long",
+        ]
+        return sum(1 for field in fields if str(_extract_value(record.get(field)) or "").strip())
 
     for record in data_list:
         stats_trans["total"] += 1
+        raw_name = record.get("denominaci")
+        key = _normalize_name(raw_name)
+        if not key:
+            deduped_records.append(record)
+            continue
+
+        if key not in seen_records:
+            index = len(deduped_records)
+            deduped_records.append(record)
+            seen_records[key] = {"index": index, "record": record}
+            continue
+
+        stats_trans["invalid"] += 1
+        existing_meta = seen_records[key]
+        existing_record = existing_meta["record"]
+        existing_has_cp = _has_postal(existing_record)
+        incoming_has_cp = _has_postal(record)
+        replace = False
+        repair_action = "Omitido por duplicado en origen"
+
+        if incoming_has_cp and not existing_has_cp:
+            replace = True
+            repair_action = "Se mantuvo la versión con código postal válido"
+        elif incoming_has_cp == existing_has_cp:
+            if _richness_score(record) > _richness_score(existing_record):
+                replace = True
+                repair_action = "Se mantuvo la versión con más información"
+
+        register_repair(
+            SOURCE_TAG,
+            raw_name,
+            record.get("municipi"),
+            "Registro duplicado detectado",
+            repair_action,
+        )
+
+        if replace:
+            idx = existing_meta["index"]
+            deduped_records[idx] = record
+            existing_meta["record"] = record
+
+    for record in deduped_records:
         res = transform_cat_record(record)
         if res:
             transformed_data.append(res)
             stats_trans["valid"] += 1
         else:
             stats_trans["invalid"] += 1
-            
+			
     print(f"Transformación CAT: Total {stats_trans['total']}, Válidos {stats_trans['valid']}, Inválidos {stats_trans['invalid']}")
     return transformed_data
 

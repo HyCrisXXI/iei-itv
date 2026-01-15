@@ -3,6 +3,7 @@
 Módulo centralizado de validadores para integración de datos.
 Contiene funciones de validación y limpieza reutilizables por todos los extractores.
 """
+from typing import Callable, List
 import re
 
 
@@ -70,7 +71,12 @@ def choose_best_value(val1, val2, validator=None):
     return val1 if len(str(val1)) >= len(str(val2)) else val2
 
 
-def merge_duplicate_records(data_list: list, key_field: str, field_validators: dict = None) -> list:
+def merge_duplicate_records(
+    data_list: list,
+    key_field: str,
+    field_validators: dict | None = None,
+    on_merge: Callable[[str, List[dict]], None] | None = None,
+) -> list:
     """
     Fusiona registros duplicados por un campo clave.
     Combina campos tomando el mejor valor de cada uno.
@@ -102,7 +108,13 @@ def merge_duplicate_records(data_list: list, key_field: str, field_validators: d
         if len(records) == 1:
             merged_list.append(records[0])
             continue
-        
+		
+        if on_merge:
+            try:
+                on_merge(key, records)
+            except Exception:
+                pass
+
         # Fusionar múltiples registros
         base = records[0].copy()
         print(f"   [*] Fusionando {len(records)} registros duplicados para '{key_field}'={key}")

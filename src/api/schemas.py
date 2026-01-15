@@ -69,6 +69,20 @@ class RegistroRechazadoSchema(BaseModel):
     motivo: str = Field(..., description="Motivo del rechazo")
 
 
+class EstadoIncidencia(str, Enum):
+    reparado = "reparado"
+    rechazado = "rechazado"
+
+
+class RegistroIncidenciaSchema(BaseModel):
+    fuente: str = Field(..., description="Identificador de la comunidad")
+    nombre: str = Field(..., description="Nombre del registro afectado")
+    localidad: Optional[str] = Field(None, description="Localidad asociada")
+    motivo: str = Field(..., description="Detalle del incidente")
+    estado: EstadoIncidencia = Field(..., description="Resultado del procesamiento")
+    accion: Optional[str] = Field(None, description="Transformación aplicada si se pudo reparar")
+
+
 class LoadRequest(BaseModel):
     fuentes: List[str] = Field(
         ...,
@@ -92,7 +106,11 @@ class FuenteCargaDetalle(BaseModel):
     )
     rechazados: List[RegistroRechazadoSchema] = Field(
         default_factory=list,
-        description="Registros descartados durante la transformación",
+        description="Registros descartados durante la transformación o el guardado",
+    )
+    incidencias: List[RegistroIncidenciaSchema] = Field(
+        default_factory=list,
+        description="Listado de incidencias reportadas por la transformación",
     )
 
 
@@ -109,4 +127,8 @@ class LoadProcessResponse(BaseModel):
     rechazados: List[RegistroRechazadoSchema] = Field(
         default_factory=list,
         description="Listado consolidado de registros descartados",
+    )
+    incidencias: List[RegistroIncidenciaSchema] = Field(
+        default_factory=list,
+        description="Incidencias detalladas que muestran reparaciones o rechazos",
     )

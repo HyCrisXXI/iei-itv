@@ -3,8 +3,12 @@ import sys
 import requests
 import json
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-from common.db_storage import save_stations
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from src.common.db_storage import save_stations
 
 API_BASE_URL = "http://127.0.0.1:8000"
 WRAPPER_ENDPOINTS = {

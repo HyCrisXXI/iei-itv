@@ -2,6 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.database.session import get_db
@@ -14,6 +15,8 @@ from src.api.schemas import (
 	FuenteCargaDetalle,
 	RegistroReparadoSchema,
 	RegistroRechazadoSchema,
+	RegistroIncidenciaSchema,
+	EstadoIncidencia,
 )
 from src.common.db_storage import save_stations
 from src.common.errors import consume_error_logs, reset_error_logs
@@ -118,20 +121,27 @@ async def get_stations_by_source(
 	description="Elimina estaciones, localidades y provincias almacenadas en la base de datos.",
 )
 async def delete_storage(db: Session = Depends(get_db)) -> dict:
-	# Se elimina siguiendo la jerarquía para evitar claves foráneas huérfanas
-	estaciones_eliminadas = db.query(Estacion).delete(synchronize_session=False)
-	# Localidades dependen de provincias, por eso se borran en segundo lugar
-	localidades_eliminadas = db.query(Localidad).delete(synchronize_session=False)
-	# Por último provincias; si no hubiera localidades relacionadas, la operación es segura
-	provincias_eliminadas = db.query(Provincia).delete(synchronize_session=False)
+	# Contadores previos para informar al usuario
+	estaciones_count = db.query(Estacion).count()
+	localidades_count = db.query(Localidad).count()
+	provincias_count = db.query(Provincia).count()
+
+	truncate_statements = (
+		"TRUNCATE TABLE estaciones RESTART IDENTITY CASCADE",
+		"TRUNCATE TABLE localidades RESTART IDENTITY CASCADE",
+		"TRUNCATE TABLE provincias RESTART IDENTITY CASCADE",
+	)
+	for stmt in truncate_statements:
+		db.execute(text(stmt))
+	
 	db.commit()
 
 	return {
 		"message": "Almacén reiniciado correctamente",
 		"eliminados": {
-			"estaciones": estaciones_eliminadas,
-			"localidades": localidades_eliminadas,
-			"provincias": provincias_eliminadas,
+			"estaciones": estaciones_count,
+			"localidades": localidades_count,
+			"provincias": provincias_count,
 		},
 	}
 
@@ -178,6 +188,7 @@ def _process_sources_pipeline(fuentes: List[str]) -> dict:
 	total_rechazados = 0
 	reparados_global: List[RegistroReparadoSchema] = []
 	rechazados_global: List[RegistroRechazadoSchema] = []
+	incidencias_global: List[RegistroIncidenciaSchema] = []
 
 	for fuente in fuentes:
 		detalle = _process_single_source(fuente)
@@ -187,6 +198,7 @@ def _process_sources_pipeline(fuentes: List[str]) -> dict:
 		total_rechazados += detalle.rechazados_transformacion + len(detalle.errores_guardado)
 		reparados_global.extend(detalle.reparados)
 		rechazados_global.extend(detalle.rechazados)
+		incidencias_global.extend(detalle.incidencias)
 
 	return {
 		"total_fuentes": len(detalles),
@@ -196,6 +208,7 @@ def _process_sources_pipeline(fuentes: List[str]) -> dict:
 		"detalles": detalles,
 		"reparados": reparados_global,
 		"rechazados": rechazados_global,
+		"incidencias": incidencias_global,
 	}
 
 
@@ -208,20 +221,80 @@ def _process_single_source(fuente: str) -> FuenteCargaDetalle:
 		transformed_records = transformer(raw_records)
 		log_data = consume_error_logs()
 		reparados = [RegistroReparadoSchema(**entry) for entry in log_data["reparados"]]
-		rechazados = [RegistroRechazadoSchema(**entry) for entry in log_data["rechazados"]]
+		rechazos_transformacion = [RegistroRechazadoSchema(**entry) for entry in log_data["rechazados"]]
+		incidencias: List[RegistroIncidenciaSchema] = [
+			RegistroIncidenciaSchema(
+				fuente=entry.fuente,
+				nombre=entry.nombre,
+				localidad=entry.localidad,
+				motivo=entry.motivo,
+				estado=EstadoIncidencia.reparado,
+				accion=entry.operacion,
+			)
+			for entry in reparados
+		]
+		incidencias.extend(
+			[
+				RegistroIncidenciaSchema(
+					fuente=entry.fuente,
+					nombre=entry.nombre,
+					localidad=entry.localidad,
+					motivo=entry.motivo,
+					estado=EstadoIncidencia.rechazado,
+					accion=None,
+				)
+				for entry in rechazos_transformacion
+			]
+		)
 		stats = save_stations(transformed_records, fuente)
-		errores_guardado = [str(err) for err in stats.get("errors", [])]
+		errores_guardado_raw = stats.get("errors", [])
+		rechazos_guardado: List[RegistroRechazadoSchema] = []
+		errores_guardado: List[str] = []
+		for err in errores_guardado_raw:
+			if isinstance(err, dict):
+				nombre_err = err.get("nombre") or "Desconocida"
+				localidad_err = err.get("localidad")
+				motivo_err = err.get("motivo") or "Error al guardar"
+			else:
+				nombre_err = "Desconocida"
+				localidad_err = None
+				motivo_err = str(err)
+			errores_guardado.append(motivo_err)
+			rechazos_guardado.append(
+				RegistroRechazadoSchema(
+					fuente=fuente,
+					nombre=nombre_err,
+					localidad=localidad_err,
+					motivo=motivo_err,
+				)
+			)
+		incidencias.extend(
+			[
+				RegistroIncidenciaSchema(
+					fuente=entry.fuente,
+					nombre=entry.nombre,
+					localidad=entry.localidad,
+					motivo=entry.motivo,
+					estado=EstadoIncidencia.rechazado,
+					accion="Descartado al guardar en BD",
+				)
+				for entry in rechazos_guardado
+			]
+		)
+		rechazados = rechazos_transformacion + rechazos_guardado
+		rechazados_transformacion = len(rechazos_transformacion)
 
 		return FuenteCargaDetalle(
 			fuente=fuente,
 			registros_origen=len(raw_records),
 			registros_transformados=len(transformed_records),
-			rechazados_transformacion=len(rechazados),
+			rechazados_transformacion=rechazados_transformacion,
 			insertados=stats.get("inserted", 0),
 			duplicados=stats.get("duplicates", 0),
 			errores_guardado=errores_guardado,
 			reparados=reparados,
 			rechazados=rechazados,
+			incidencias=incidencias,
 		)
 	except Exception as exc:  # pylint: disable=broad-except
 		reset_error_logs()
@@ -235,4 +308,5 @@ def _process_single_source(fuente: str) -> FuenteCargaDetalle:
 			errores_guardado=[f"Error procesando la fuente: {exc}"],
 			reparados=[],
 			rechazados=[],
+			incidencias=[],
 		)

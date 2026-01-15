@@ -52,7 +52,11 @@ def save_stations(stations_data: list[dict], source_tag: str) -> dict:
             nombre = data.get("nombre")
             # Verificación de seguridad para evitar errores al comprometer la base de datos
             if not nombre:
-                stats["errors"].append("Nombre vacío")
+                stats["errors"].append({
+                    "nombre": data.get("nombre"),
+                    "localidad": data.get("l_nombre"),
+                    "motivo": "Nombre vacío tras la transformación",
+                })
                 continue
 
             p_nombre = data.get("p_nombre")
