@@ -5,7 +5,7 @@ from src.api.routes.load import router as load_router
 app = FastAPI(
     title="IEI ITV API",
     description="API para carga de estaciones",
-    version="1.0.1"
+    version="1.0.0"
 )
 
 app.include_router(load_router)

@@ -1,6 +1,7 @@
 # src/gui.py
 """ITV Station Search GUI with ttkbootstrap and OpenStreetMap integration."""
 import threading
+import time
 
 import requests
 import ttkbootstrap as ttk
@@ -26,6 +27,10 @@ class ITVSearchApp:
     API_BASE_URL = "http://localhost:8000"
     # Tile source URL (plain OSM)
     TILE_SERVER_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    
+    # Marker colors
+    MARKER_COLOR_NORMAL = ("#C02720", "#EA4335")       # Red (circle, outside)
+    MARKER_COLOR_HIGHLIGHT = ("#FF6600", "#FF8C00")    # Orange (circle, outside)
 
     def __init__(self):
         """Initialize the application."""
@@ -37,8 +42,19 @@ class ITVSearchApp:
         )
         self.root.position_center()
 
-        # Store current markers for cleanup
-        self.markers = []
+        # Store all markers with their station data for recreation
+        self.all_markers = {}  # {station_id: marker}
+        self.station_data = {}  # {station_id: station_dict} for marker recreation
+        
+        # Store current search result IDs for highlighting
+        self.search_result_ids = set()
+        
+        # Info popup reference
+        self.info_popup = None
+        self.popup_show_time = 0  # Timestamp when popup was shown
+        
+        # Flag to skip zoom when selection is from marker click
+        self._skip_zoom_on_select = False
         
         # Store search results
         self.results = []
@@ -74,8 +90,22 @@ class ITVSearchApp:
         )
         title_label.pack(side=LEFT)
         
-        # Theme selector on the right
-        theme_frame = ttk.Frame(header_frame)
+        # Right side controls frame
+        right_controls = ttk.Frame(header_frame)
+        right_controls.pack(side=RIGHT)
+        
+        # Refresh button
+        self.refresh_btn = ttk.Button(
+            right_controls,
+            text="Refrescar",
+            command=self._refresh_data,
+            bootstyle="warning-outline",
+            width=12
+        )
+        self.refresh_btn.pack(side=RIGHT, padx=(10, 0))
+        
+        # Theme selector
+        theme_frame = ttk.Frame(right_controls)
         theme_frame.pack(side=RIGHT)
         
         ttk.Label(
@@ -272,6 +302,9 @@ class ITVSearchApp:
             command=self._fit_to_results,
             bootstyle="info-outline"
         ).pack(side=LEFT, padx=(10, 0))
+        
+        # Bind click on map to hide popup
+        self.map_widget.canvas.bind("<Button-1>", self._on_map_click, add="+")
 
         
     def _create_results_section(self):
@@ -361,7 +394,7 @@ class ITVSearchApp:
             pass  # Silently fail on startup
             
     def _on_stations_loaded(self, data):
-        """Handle loaded stations - populate dropdowns and map."""
+        """Handle loaded stations - populate dropdowns and map with all markers."""
         self.all_stations = data.get('resultados', [])
         
         # Extract unique localidades and provincias for dropdowns
@@ -383,8 +416,99 @@ class ITVSearchApp:
         self.localidad_combo['values'] = self.all_localidades[:20]
         self.provincia_combo['values'] = self.all_provincias
         
-        # Display all stations
-        self._display_results(data)
+        # Clear old markers and create new ones for all stations
+        self._clear_all_markers()
+        self._create_all_markers()
+        
+        # Display all stations in table (not filtered, so all markers stay red)
+        self._display_results(data, is_filtered=False)
+    
+    def _create_all_markers(self, highlight_ids=None):
+        """Create markers for all stations on the map.
+        
+        Args:
+            highlight_ids: Set of station IDs to highlight in orange. If None, all are red.
+        """
+        highlight_ids = highlight_ids or set()
+        
+        # Helper function to create a marker
+        def create_marker(est, is_highlighted):
+            lat = est.get('latitud')
+            lon = est.get('longitud')
+            station_id = est.get('nombre')
+            
+            if not (lat and lon and station_id):
+                return
+            
+            # Store station data for later recreation
+            self.station_data[station_id] = est
+            
+            # Determine color
+            if is_highlighted:
+                color_circle = self.MARKER_COLOR_HIGHLIGHT[0]
+                color_outside = self.MARKER_COLOR_HIGHLIGHT[1]
+            else:
+                color_circle = self.MARKER_COLOR_NORMAL[0]
+                color_outside = self.MARKER_COLOR_NORMAL[1]
+            
+            # Create closure to capture est value
+            def make_click_handler(station):
+                def handler(marker):
+                    self._on_marker_click(station)
+                return handler
+            
+            marker = self.map_widget.set_marker(
+                lat, lon,
+                text="",
+                marker_color_circle=color_circle,
+                marker_color_outside=color_outside,
+                command=make_click_handler(est)
+            )
+            self.all_markers[station_id] = marker
+        
+        # First pass: create non-highlighted markers (red) - these go on bottom
+        for est in self.all_stations:
+            station_id = est.get('nombre')
+            if station_id and station_id not in highlight_ids:
+                create_marker(est, is_highlighted=False)
+        
+        # Second pass: create highlighted markers (orange) - these go on top
+        for est in self.all_stations:
+            station_id = est.get('nombre')
+            if station_id and station_id in highlight_ids:
+                create_marker(est, is_highlighted=True)
+    
+    def _refresh_data(self):
+        """Refresh all data from the API."""
+        self.refresh_btn.configure(text="Cargando...", state="disabled")
+        threading.Thread(target=self._fetch_and_refresh, daemon=True).start()
+    
+    def _fetch_and_refresh(self):
+        """Fetch data and refresh the UI."""
+        try:
+            response = requests.get(
+                f"{self.API_BASE_URL}/estaciones",
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.root.after(0, lambda: self._on_refresh_complete(data))
+            else:
+                self.root.after(0, lambda: self._on_refresh_error())
+                
+        except Exception:
+            self.root.after(0, lambda: self._on_refresh_error())
+    
+    def _on_refresh_complete(self, data):
+        """Handle refresh completion."""
+        self._on_stations_loaded(data)
+        self.refresh_btn.configure(text="Refrescar", state="normal")
+        self._clear_search()
+    
+    def _on_refresh_error(self):
+        """Handle refresh error."""
+        self.refresh_btn.configure(text="Refrescar", state="normal")
         
     def _clear_search(self):
         """Clear all search fields and show all stations."""
@@ -393,9 +517,12 @@ class ITVSearchApp:
         self.provincia_var.set("")
         self.tipo_var.set("Todos")
         
-        # Reload all stations
+        # Reset all marker colors to normal (red)
+        self._reset_marker_colors()
+        
+        # Reload all stations in table (not filtered, so all markers stay red)
         if self.all_stations:
-            self._display_results({'resultados': self.all_stations, 'total': len(self.all_stations)})
+            self._display_results({'resultados': self.all_stations, 'total': len(self.all_stations)}, is_filtered=False)
             self._center_map_spain()
         
     def _perform_search(self):
@@ -421,10 +548,13 @@ class ITVSearchApp:
         if tipo and tipo != "Todos":
             params['tipo'] = tipo
         
-        # Perform API call in background thread
-        threading.Thread(target=self._api_search, args=(params,), daemon=True).start()
+        # Check if any filters are applied
+        has_filters = len(params) > 0
         
-    def _api_search(self, params):
+        # Perform API call in background thread
+        threading.Thread(target=self._api_search, args=(params, has_filters), daemon=True).start()
+        
+    def _api_search(self, params, has_filters):
         """Make API request for search."""
         try:
             response = requests.get(
@@ -435,17 +565,31 @@ class ITVSearchApp:
             
             if response.status_code == 200:
                 data = response.json()
-                self.root.after(0, lambda: self._display_results(data))
+                # Only highlight markers if actual filters were applied
+                self.root.after(0, lambda: self._display_results(data, is_filtered=has_filters))
             elif response.status_code == 404:
                 self.root.after(0, lambda: self._display_no_results())
                 
         except Exception:
             pass
             
-    def _display_results(self, data, fit_to_results=False):
-        """Display search results in table and map."""
+    def _display_results(self, data, fit_to_results=False, is_filtered=False):
+        """Display search results in table and optionally highlight markers.
+        
+        Args:
+            data: Response data with 'resultados' and 'total'
+            fit_to_results: Whether to zoom map to show results
+            is_filtered: If True, highlight matching markers in orange. If False, keep all red.
+        """
         self.results = data.get('resultados', [])
         total = data.get('total', 0)
+        
+        # Get IDs of search results
+        self.search_result_ids = set()
+        for est in self.results:
+            station_id = est.get('nombre')
+            if station_id:
+                self.search_result_ids.add(station_id)
         
         # Update results label
         self.results_label.configure(
@@ -456,8 +600,11 @@ class ITVSearchApp:
         for item in self.tree.get_children():
             self.tree.delete(item)
         
-        # Clear existing markers
-        self._clear_markers()
+        # Only highlight markers if this is a filtered search
+        if is_filtered:
+            self._highlight_markers()
+        else:
+            self._reset_marker_colors()
         
         # Add rows to table
         for est in self.results:
@@ -472,45 +619,40 @@ class ITVSearchApp:
                 est.get('descripcion', 'N/A') or 'N/A',
             ))
         
-        # Add markers to map with click handlers
-        for idx, est in enumerate(self.results):
-            lat = est.get('latitud')
-            lon = est.get('longitud')
-            if lat and lon:
-                # Create closure to capture est value
-                def make_click_handler(station):
-                    def handler(marker):
-                        self._on_marker_click(station)
-                    return handler
-                
-                marker = self.map_widget.set_marker(
-                    lat, lon,
-                    text="",
-                    marker_color_circle="#C02720",
-                    marker_color_outside="#EA4335",
-                    command=make_click_handler(est)
-                )
-                self.markers.append(marker)
-        
-        # Fit map to show all markers only if explicitly requested
-        if fit_to_results and self.markers:
+        # Fit map to show highlighted markers only if explicitly requested
+        if fit_to_results and self.search_result_ids:
             self._fit_to_results()
         
     def _display_no_results(self):
         """Display no results message."""
         self.results = []
+        self.search_result_ids = set()
         for item in self.tree.get_children():
             self.tree.delete(item)
-        self._clear_markers()
+        # Reset all marker colors to red (no highlights)
+        self._reset_marker_colors()
         self.results_label.configure(
             text="Resultados de búsqueda: 0 encontrados"
         )
-        
-    def _clear_markers(self):
+    
+    def _highlight_markers(self):
+        """Highlight markers that match search results (orange), reset others (red)."""
+        # Delete all existing markers and recreate with correct colors
+        self._clear_all_markers()
+        self._create_all_markers(highlight_ids=self.search_result_ids)
+    
+    def _reset_marker_colors(self):
+        """Reset all markers to normal color (red)."""
+        self.search_result_ids = set()
+        # Delete all existing markers and recreate in red
+        self._clear_all_markers()
+        self._create_all_markers(highlight_ids=None)
+    
+    def _clear_all_markers(self):
         """Remove all markers from the map."""
-        for marker in self.markers:
+        for station_id, marker in self.all_markers.items():
             marker.delete()
-        self.markers = []
+        self.all_markers = {}
         
     def _center_map_spain(self):
         """Center the map on Spain."""
@@ -566,6 +708,11 @@ class ITVSearchApp:
             
     def _on_row_select(self, event):
         """Handle row selection in the table."""
+        # Skip zoom if selection was triggered by marker click
+        if self._skip_zoom_on_select:
+            self._skip_zoom_on_select = False
+            return
+        
         selection = self.tree.selection()
         if not selection:
             return
@@ -583,14 +730,20 @@ class ITVSearchApp:
                 lon = est.get('longitud')
                 if lat and lon:
                     self.map_widget.set_position(lat, lon)
-                    self.map_widget.set_zoom(14)
+                    self.map_widget.set_zoom(10)
                 break
     
     def _on_marker_click(self, station):
-        """Handle marker click - highlight corresponding row in table."""
+        """Handle marker click - show info popup and highlight row in table."""
         nombre = station.get('nombre')
         if not nombre:
             return
+        
+        # Show info popup
+        self._show_info_popup(station)
+        
+        # Set flag to skip zoom when selecting in table
+        self._skip_zoom_on_select = True
         
         # Find and select the corresponding row in the table
         for item_id in self.tree.get_children():
@@ -601,6 +754,83 @@ class ITVSearchApp:
                 self.tree.see(item_id)
                 self.tree.focus(item_id)
                 break
+    
+    def _show_info_popup(self, station):
+        """Show info popup for a station."""
+        # Hide existing popup first
+        self._hide_info_popup()
+        
+        lat = station.get('latitud')
+        lon = station.get('longitud')
+        if not lat or not lon:
+            return
+        
+        # Get station info
+        nombre = station.get('nombre', 'N/A')
+        tipo = station.get('tipo', 'N/A')
+        direccion = station.get('direccion') or 'N/A'
+        localidad = station.get('localidad_nombre') or 'N/A'
+        provincia = station.get('provincia_nombre') or 'N/A'
+        cod_postal = station.get('codigo_postal') or 'N/A'
+        horario = station.get('horario') or 'N/A'
+        
+        # Build info text
+        info_text = f"""{nombre}
+
+Tipo: {tipo}
+Dirección: {direccion}
+Localidad: {localidad}
+Provincia: {provincia}
+Cód. Postal: {cod_postal}
+Horario: {horario}"""
+        
+        # Create popup frame on the map canvas
+        self.info_popup = ttk.Frame(self.map_widget, bootstyle="warning")
+        
+        # Create label with info
+        info_label = ttk.Label(
+            self.info_popup,
+            text=info_text,
+            font=("Segoe UI", 9),
+            padding=10,
+            justify="left",
+            wraplength=250,
+            bootstyle="inverse-warning"
+        )
+        info_label.pack(fill=BOTH, expand=True)
+        
+        # Close button
+        close_btn = ttk.Button(
+            self.info_popup,
+            text="✕ Cerrar",
+            command=self._hide_info_popup,
+            bootstyle="warning-outline",
+            width=10
+        )
+        close_btn.pack(pady=(0, 5))
+        
+        # Position popup near the marker (offset to not cover it)
+        # Get canvas position of the lat/lon
+        x, y = self.map_widget.canvas.winfo_width() // 2, self.map_widget.canvas.winfo_height() // 2
+        
+        # Place popup on canvas
+        self.info_popup.place(x=x + 20, y=y - 100, anchor="w")
+        
+        # Record time popup was shown
+        self.popup_show_time = time.time()
+    
+    def _hide_info_popup(self, event=None):
+        """Hide the info popup."""
+        if self.info_popup:
+            self.info_popup.destroy()
+            self.info_popup = None
+    
+    def _on_map_click(self, event):
+        """Handle click on map - hide popup if it's been open for a while."""
+        # Ignore clicks within 500ms of showing popup (to avoid instant close)
+        if time.time() - self.popup_show_time < 0.5:
+            return
+        self._hide_info_popup()
                 
     def run(self):
         """Run the application."""
