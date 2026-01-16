@@ -219,7 +219,7 @@ def transform_cv_data(data_list: list) -> list:
                 SOURCE_TAG,
                 nombre or f"Estación {key}",
                 municipio_final,
-                "Registro duplicado (municipio con distinta capitalización)",
+                "Registro duplicado fusionado (municipio con distinta capitalización)",
             )
 
     merged_data = merge_duplicate_records(
