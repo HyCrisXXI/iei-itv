@@ -288,12 +288,11 @@ def transform_cat_data(data_list: list) -> list:
                 replace = True
                 repair_action = "Se mantuvo la versión con más información"
 
-        register_repair(
+        register_rejection(
             SOURCE_TAG,
             raw_name,
             record.get("municipi"),
-            "Registro duplicado detectado",
-            repair_action,
+            f"Registro duplicado detectado ({repair_action})",
         )
 
         if replace:

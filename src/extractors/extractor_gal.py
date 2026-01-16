@@ -166,12 +166,11 @@ def transform_gal_data(data_list: list[dict]) -> list[dict]:
         stats_trans["total"] += 1
         key_nombre = str(record.get("NOME DA ESTACIÓN", "")).strip().lower()
         if key_nombre and key_nombre in seen_keys:
-            register_repair(
+            register_rejection(
                 SOURCE_TAG,
                 record.get("NOME DA ESTACIÓN"),
                 record.get("CONCELLO"),
-                "Registro duplicado detectado",
-                "Omitido por duplicado en origen",
+                "Registro duplicado detectado y omitido",
             )
             stats_trans["invalid"] += 1
             continue

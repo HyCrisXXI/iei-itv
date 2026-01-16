@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.extractors.selenium_cv import geolocate_google_selenium
 from src.common.dependencies import get_api_data, save_transformed_to_json, transformed_data_to_database
-from src.common.errors import error_msg, register_rejection, register_repair, check_postal_code
+from src.common.errors import error_msg, register_rejection, check_postal_code
 from src.common.validators import (
     is_valid_horario, 
     is_valid_email, 
@@ -215,12 +215,11 @@ def transform_cv_data(data_list: list) -> list:
         if len(unique_display) > 1 and len(unique_normalized) == 1:
             municipio_final = municipios[0]
             nombre = build_station_name(municipio_final)
-            register_repair(
+            register_rejection(
                 SOURCE_TAG,
                 nombre or f"Estación {key}",
                 municipio_final,
-                "Municipio duplicado con distinta capitalización",
-                "Municipio normalizado durante la fusión de duplicados",
+                "Registro duplicado (municipio con distinta capitalización)",
             )
 
     merged_data = merge_duplicate_records(
